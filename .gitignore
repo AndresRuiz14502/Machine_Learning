@@ -1,0 +1,20 @@
+# Datos grandes
+*.csv
+*.zip
+Workshop1/dataSet/*.csv
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Submódulo (si no lo quieres trackear)
+Machine_Learning/
+
+# Sistema
+.DS_Store
+Thumbs.db
