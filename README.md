@@ -21,10 +21,19 @@ evaluación de modelos de factorización de matrices.
 ### Descarga y ubicación
 
 1. Descargar `ml-32m.zip` desde el enlace oficial o del siguiente enlace: https://drive.google.com/drive/folders/1RB8vg3Sc2HD2XlrOCdaUIwm5cEbPXRQ4?usp=sharing 
-2. Descomprimir en `dataSet/` con esta estructura:
+## Instalación de los datos
+
+1. Descarga el dataset MovieLens desde https://grouplens.org/datasets/movielens/
+
+2. Descomprímelo en la carpeta `dataSet/` con la siguiente estructura:
+
+```text
 Machine_Learning/
 └── dataSet/
-  ├── ratings.csv # userId, movieId, rating, timestamp
-  ├── movies.csv # movieId, title, genres
-  ├── tags.csv # userId, movieId, tag, timestamp
-  └── links.csv # movieId, imdbId, tmdbId
+    ├── ratings.csv    # userId, movieId, rating, timestamp
+    ├── movies.csv     # movieId, title, genres
+    ├── tags.csv       # userId, movieId, tag, timestamp
+    └── links.csv      # movieId, imdbId, tmdbId
+```
+
+3. Verifica que los archivos estén en la ruta correcta antes de ejecutar el cuaderno.
