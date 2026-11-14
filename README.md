@@ -1,8 +1,8 @@
 # Workshop 1 — Sistema de Recomendación con MovieLens 32M
 
-Taller de Machine Learning: construcción de un sistema de recomendación
-basado en filtrado colaborativo, desde el análisis exploratorio hasta la
-evaluación de modelos de factorización de matrices.
+Taller de Machine Learning: análisis exploratorio, preparación de datos,
+ingeniería de características y evaluación de modelos base supervisados sobre
+MovieLens 32M.
 
 ---
 
@@ -11,18 +11,16 @@ evaluación de modelos de factorización de matrices.
 ```text
 Machine_Learning/
 ├── src/
-│   ├── __init__.py
 │   ├── data_loader.py     # Carga, submuestreo, filtrado, IDs contiguos y split temporal
 │   ├── features.py        # Ingeniería de características (estadísticos, sesgos, géneros, antigüedad)
-│   └── baselines.py       # Métricas y baselines (Popularity, Bias, kNN, Ridge, Lasso, Árboles)
+│   └── baselines.py       # Entrenamiento y evaluación de modelos base (regresión y clasificación)
 ├── notebooks/
-│   ├── eda.ipynb          # Cuaderno completo de EDA con visualizaciones y análisis
-│   └── WorkShop1.ipynb    # Flujo de modelado, FunkSVD, ajuste de hiperparámetros y evaluación
+│   └── eda.ipynb          # Cuaderno completo de EDA con visualizaciones y análisis
 ├── data/
 │   └── splits.json        # Índices y metadatos de partición train/val/test para reproducibilidad
 ├── dataSet/               # Datos crudos de MovieLens 32M (no versionados en Git)
 ├── checkpoints/           # Pesos de modelos guardados (talleres futuros)
-├── runs/                  # Registros de entrenamiento (wandb / TensorBoard)
+├── runs/                  # Registros y gráficos de evaluación (residuales y matrices de confusión)
 ├── requirements.txt       # Dependencias fijadas del entorno virtual
 └── README.md
 ```
@@ -34,7 +32,6 @@ Machine_Learning/
 **MovieLens 32M** (GroupLens Research, University of Minnesota).
 
 - **Fuente oficial:** https://grouplens.org/datasets/movielens/32m/
-- **Enlace alternativo:** https://drive.google.com/drive/folders/1RB8vg3Sc2HD2XlrOCdaUIwm5cEbPXRQ4?usp=sharing
 - **Archivo:** `ml-32m.zip` (~250 MB comprimido, ~1 GB descomprimido)
 - **Contenido:** 32.000.204 ratings, 200.948 usuarios, 87.585 películas, enero 1995 – octubre 2023.
 - **Licencia:** uso académico (ver `README.txt` del dataset).
@@ -75,12 +72,26 @@ pip install -r requirements.txt
 .venv/bin/python -m src.data_loader
 ```
 
-2. **Entrenar y evaluar los modelos base (`src/baselines.py`):**
+2. **Entrenar y evaluar los modelos base (regresión y clasificación):**
 
 ```bash
 .venv/bin/python -m src.baselines
 ```
 
-3. **Explorar el EDA y ejecutar el modelado completo (`FunkSVD`):**
-   - Abrir y ejecutar `notebooks/eda.ipynb` para el análisis exploratorio completo.
-   - Abrir y ejecutar `notebooks/WorkShop1.ipynb` (seleccionando el kernel `.venv`) para correr el flujo completo con `FunkSVD` y la evaluación final.
+Esto imprime las métricas en consola y guarda los gráficos en `runs/`:
+- `runs/residuals_regression.png` — análisis de residuales ($y - \hat{y}$) para los modelos de regresión.
+- `runs/confusion_matrices.png` — matrices de confusión para los clasificadores sobre `like`.
+
+3. **Análisis Exploratorio de Datos (EDA):**
+   - Abrir y ejecutar `notebooks/eda.ipynb` seleccionando el kernel `.venv`.
+
+---
+
+## Métricas más importantes para la tarea
+
+- **Regresión (`rating` en escala 0.5–5.0):**
+  - **RMSE / MSE** y **MAE** son las métricas principales porque miden directamente el error en estrellas de la predicción de `rating` (RMSE penaliza más los errores grandes, mientras MAE refleja el error típico absoluto).
+  - **$R^2$** complementa la lectura indicando qué proporción de la varianza de los ratings explica cada modelo respecto a predecir la media global.
+- **Clasificación binaria (`like = 1` si `rating >= 4.0`):**
+  - **AUC-ROC** es la métrica más importante porque evalúa la capacidad de ordenamiento/discriminación del modelo entre ítems que gustarán y los que no a través de todos los umbrales de probabilidad, lo cual es clave en recomendación.
+  - **F1-score** (junto con **precisión** y **recall**) es fundamental para equilibrar falsos positivos (recomendar películas que no gustan) y falsos negativos (omitir películas relevantes), siendo más informativa que `accuracy` cuando las clases no están perfectamente balanceadas.
