@@ -1,10 +1,10 @@
-"""Ingeniería de características sobre el conjunto de entrenamiento (sin leakage)."""
+"""Feature engineering on the training set (no data leakage)."""
 
 import pandas as pd
 
 
 def compute_train_stats(train_df: pd.DataFrame):
-    """Calcula media global, estadísticos por usuario/ítem y sesgos SOLO en train."""
+    """Compute global mean, per-user/item statistics, and biases ONLY on train."""
     mu = float(train_df["rating"].mean())
 
     user_stats = train_df.groupby("u")["rating"].agg(u_mean="mean", u_count="size")
@@ -17,7 +17,7 @@ def compute_train_stats(train_df: pd.DataFrame):
 
 
 def build_genre_features(movies: pd.DataFrame, item2idx: dict):
-    """Genera géneros one-hot y año por película indexados por 'i'."""
+    """Build one-hot genre features and release year per movie indexed by 'i'."""
     movies_idx = movies[movies["movieId"].isin(item2idx)].copy()
     movies_idx["i"] = movies_idx["movieId"].map(item2idx)
     if "year_movie" not in movies_idx.columns:
@@ -45,12 +45,12 @@ def build_feature_matrix(
     item_year: pd.Series,
     genre_ohe: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Ensambla la tabla de features (user/item/sesgos/genero/ano/temporal)."""
+    """Assemble the feature table (user/item/biases/genre/year/temporal)."""
     X = part[["u", "i", "year", "rating", "like"]].copy()
     X = X.join(user_stats, on="u").join(item_stats, on="i")
     X = X.join(user_bias, on="u").join(item_bias, on="i")
     X = X.join(item_year, on="i").join(genre_ohe, on="i")
-    # Feature temporal: antigüedad de la película al momento del rating.
+    # Temporal feature: movie age at rating time.
     X["movie_age"] = (X["year"] - X["item_year"]).clip(lower=0)
     X = X.fillna(
         {
@@ -68,7 +68,7 @@ def build_feature_matrix(
 
 
 def prepare_features(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame, movies: pd.DataFrame, item2idx: dict):
-    """Construye X_train, X_val, X_test y devuelve estadísticas auxiliares."""
+    """Build X_train, X_val, X_test and return auxiliary statistics."""
     mu, user_stats, item_stats, user_bias, item_bias = compute_train_stats(train_df)
     movies_idx, genre_ohe, item_year = build_genre_features(movies, item2idx)
 

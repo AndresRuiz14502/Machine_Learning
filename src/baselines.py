@@ -1,4 +1,4 @@
-"""Métricas y modelos base (Popularity, Bias, kNN item-item y modelos tabulares)."""
+"""Metrics and baseline models (Popularity, Bias, kNN item-item, and tabular models)."""
 
 import sys
 import time
@@ -38,7 +38,6 @@ from sklearn.tree import DecisionTreeRegressor
 
 from src.data_loader import (
     N_USERS_SAMPLE_TREES,
-    PROJECT_ROOT,
     SEED,
     TOP_K,
     prepare_datasets,
@@ -63,7 +62,7 @@ def r2(y, yhat) -> float:
 
 
 def clip_rating(x):
-    """Clipping a la escala válida [0.5, 5.0]."""
+    """Clip predictions to the valid rating scale [0.5, 5.0]."""
     return np.clip(x, 0.5, 5.0)
 
 
@@ -103,8 +102,17 @@ def ranking_metrics(recommended, relevant, k: int):
     return dict(precision=precision, recall=recall, ndcg=ndcg, map=ap, hit=hit_rate)
 
 
-def evaluate_ranking(score_fn, train_df: pd.DataFrame, test_df: pd.DataFrame, n_items: int, k: int = TOP_K, max_users: int = 2000, n_neg: int = 200, seed: int = SEED):
-    """score_fn(u, items)->scores. Relevantes = items con like==1 en test."""
+def evaluate_ranking(
+    score_fn,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    n_items: int,
+    k: int = TOP_K,
+    max_users: int = 2000,
+    n_neg: int = 200,
+    seed: int = SEED,
+):
+    """score_fn(u, items)->scores. Relevant = items with like==1 in test."""
     rng_local = np.random.default_rng(seed)
     test_pos = test_df[test_df["like"] == 1].groupby("u")["i"].apply(set)
     users = test_pos.index.to_numpy()
@@ -144,7 +152,7 @@ def run_popularity_and_bias(
     results: dict,
     ranking_results: dict,
 ):
-    """Evalúa GlobalMean, Bias (mu+bu+bi) y Popularity."""
+    """Evaluate GlobalMean, Bias (mu+bu+bi), and Popularity."""
     bu = user_bias.to_dict()
     bi = item_bias.to_dict()
 
@@ -191,7 +199,7 @@ def run_knn_baseline(
     knn_k: int = 40,
     seed: int = SEED,
 ):
-    """kNN item-item basado en similitud coseno sobre la matriz centrada."""
+    """Item-item kNN based on cosine similarity over the centered rating matrix."""
     r_centered = train_df["rating"].to_numpy() - train_df["i"].map(item_stats["i_mean"]).to_numpy()
     R = csr_matrix((r_centered, (train_df["u"], train_df["i"])), shape=(n_users, n_items))
 
@@ -228,7 +236,7 @@ def analyze_residuals(
     save_path: Path | None = PROJECT_ROOT / "runs" / "residuals_regression.png",
     show: bool = False,
 ) -> pd.DataFrame:
-    """Calcula estadísticos y grafica el análisis de residuales (y - yhat)."""
+    """Compute summary statistics and plot residual analysis (y - yhat)."""
     y_arr = np.asarray(y, dtype=float)
     stats_rows = []
 
@@ -242,7 +250,7 @@ def analyze_residuals(
         res = y_arr - yhat_c
         stats_rows.append(
             {
-                "modelo": name,
+                "model": name,
                 "mean": float(np.mean(res)),
                 "std": float(np.std(res)),
                 "median": float(np.median(res)),
@@ -256,28 +264,28 @@ def analyze_residuals(
         ax_scatter, ax_hist = axes[idx]
         ax_scatter.scatter(yhat_c, res, alpha=0.15, s=8, color="#4C72B0")
         ax_scatter.axhline(0.0, color="#C44E52", linestyle="--", linewidth=1.2)
-        ax_scatter.set_title(f"{name} - Residuales vs. Prediccion")
-        ax_scatter.set_xlabel("Prediccion (yhat)")
+        ax_scatter.set_title(f"{name} - Residuals vs. Predictions")
+        ax_scatter.set_xlabel("Prediction (yhat)")
         ax_scatter.set_ylabel("Residual (y - yhat)")
 
         ax_hist.hist(res, bins=40, color="#55A868", edgecolor="white", alpha=0.85)
         ax_hist.axvline(0.0, color="#C44E52", linestyle="--", linewidth=1.2)
-        ax_hist.set_title(f"{name} - Distribucion de residuales")
+        ax_hist.set_title(f"{name} - Residual Distribution")
         ax_hist.set_xlabel("Residual (y - yhat)")
-        ax_hist.set_ylabel("Frecuencia")
+        ax_hist.set_ylabel("Frequency")
 
     plt.tight_layout()
     if save_path is not None:
         save_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(save_path, dpi=120, bbox_inches="tight")
-        print(f"Grafico de residuales guardado en: {save_path}")
+        print(f"Residual plot saved to: {save_path}")
     if show:
         plt.show()
     else:
         plt.close(fig)
 
-    summary_df = pd.DataFrame(stats_rows).set_index("modelo")
-    print("\n=== Analisis de residuales (y - yhat) ===")
+    summary_df = pd.DataFrame(stats_rows).set_index("model")
+    print("\n=== Residual Analysis (y - yhat) ===")
     print(summary_df.round(4).to_string())
     return summary_df
 
@@ -292,7 +300,7 @@ def run_tabular_baselines(
     plot_residuals_path: Path | None = PROJECT_ROOT / "runs" / "residuals_regression.png",
     show_plots: bool = False,
 ):
-    """Entrena y evalúa Ridge, Lasso, DecisionTree, RandomForest y GradientBoosting."""
+    """Train and evaluate Ridge, Lasso, DecisionTree, RandomForest, and GradientBoosting."""
     Xtr, ytr = X_train[feature_cols].to_numpy(), X_train["rating"].to_numpy()
     Xte, yte = X_test[feature_cols].to_numpy(), X_test["rating"].to_numpy()
 
@@ -327,7 +335,7 @@ def run_tabular_baselines(
 
 
 def log_classification_result(clf_results: dict, name: str, y_true, y_pred, y_prob):
-    """Calcula accuracy, precision, recall, F1, AUC-ROC y matriz de confusión."""
+    """Compute accuracy, precision, recall, F1, AUC-ROC, and confusion matrix."""
     metrics = {
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "precision": float(precision_score(y_true, y_pred, zero_division=0)),
@@ -341,7 +349,7 @@ def log_classification_result(clf_results: dict, name: str, y_true, y_pred, y_pr
         f"{name:22s}  Acc={metrics['accuracy']:.4f}  Prec={metrics['precision']:.4f}  "
         f"Rec={metrics['recall']:.4f}  F1={metrics['f1']:.4f}  AUC={metrics['roc_auc']:.4f}"
     )
-    print(f"  Matriz de confusion:\n{cm}")
+    print(f"  Confusion matrix:\n{cm}")
     return metrics, cm
 
 
@@ -355,7 +363,7 @@ def run_classification_baselines(
     plot_cm_path: Path | None = PROJECT_ROOT / "runs" / "confusion_matrices.png",
     show_plots: bool = False,
 ):
-    """Entrena y evalúa 3 clasificadores base sobre la etiqueta binaria 'like'."""
+    """Train and evaluate 3 baseline classifiers on the binary 'like' label."""
     Xtr, ytr = X_train[feature_cols].to_numpy(), X_train["like"].to_numpy()
     Xte, yte = X_test[feature_cols].to_numpy(), X_test["like"].to_numpy()
 
@@ -378,7 +386,7 @@ def run_classification_baselines(
         ),
     }
 
-    print("\n=== Clasificacion binaria (like: rating >= 4.0) ===")
+    print("\n=== Binary Classification (like: rating >= 4.0) ===")
     cms = {}
     for name, clf in classifiers.items():
         t = time.time()
@@ -401,7 +409,7 @@ def run_classification_baselines(
     if plot_cm_path is not None:
         plot_cm_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(plot_cm_path, dpi=120, bbox_inches="tight")
-        print(f"Matrices de confusion guardadas en: {plot_cm_path}")
+        print(f"Confusion matrices saved to: {plot_cm_path}")
     if show_plots:
         plt.show()
     else:
@@ -411,7 +419,7 @@ def run_classification_baselines(
 
 
 def run_all_baselines():
-    """Ejecuta de punta a punta carga, features y todos los baselines."""
+    """Run end-to-end loading, feature engineering, and all baselines."""
     data = prepare_datasets(save_splits_file=False, verbose=True)
     feats = prepare_features(
         data["train_df"],

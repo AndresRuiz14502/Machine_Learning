@@ -1,27 +1,28 @@
-# Workshop 1 — Sistema de Recomendación con MovieLens 32M
+# Workshop 1 — MovieLens 32M Recommendation System
 
-Taller de Machine Learning: análisis exploratorio, preparación de datos,
-ingeniería de características y evaluación de modelos base supervisados sobre
+Machine Learning Workshop: exploratory data analysis, data preparation,
+feature engineering, and evaluation of supervised baseline models on
 MovieLens 32M.
 
 ---
 
-## Estructura del Repositorio
+## Repository Structure
 
 ```text
 Machine_Learning/
 ├── src/
-│   ├── data_loader.py     # Carga, submuestreo, filtrado, IDs contiguos y split temporal
-│   ├── features.py        # Ingeniería de características (estadísticos, sesgos, géneros, antigüedad)
-│   └── baselines.py       # Entrenamiento y evaluación de modelos base (regresión y clasificación)
+│   ├── __init__.py
+│   ├── data_loader.py     # Loading, subsampling, filtering, contiguous IDs, and temporal split
+│   ├── features.py        # Feature engineering (user/item stats, biases, genres, movie age)
+│   └── baselines.py       # Training and evaluation of baseline models (regression & classification)
 ├── notebooks/
-│   └── eda.ipynb          # Cuaderno completo de EDA con visualizaciones y análisis
+│   └── eda.ipynb          # Full EDA notebook with visualizations and analysis
 ├── data/
-│   └── splits.json        # Índices y metadatos de partición train/val/test para reproducibilidad
-├── dataSet/               # Datos crudos de MovieLens 32M (no versionados en Git)
-├── checkpoints/           # Pesos de modelos guardados (talleres futuros)
-├── runs/                  # Registros y gráficos de evaluación (residuales y matrices de confusión)
-├── requirements.txt       # Dependencias fijadas del entorno virtual
+│   └── splits.json        # Train/validation/test split indices and metadata for reproducibility
+├── dataSet/               # Raw MovieLens 32M data (not tracked in Git)
+├── checkpoints/           # Saved model weights (future workshops)
+├── runs/                  # Evaluation logs and plots (residuals and confusion matrices)
+├── requirements.txt       # Pinned virtual environment dependencies
 └── README.md
 ```
 
@@ -31,15 +32,16 @@ Machine_Learning/
 
 **MovieLens 32M** (GroupLens Research, University of Minnesota).
 
-- **Fuente oficial:** https://grouplens.org/datasets/movielens/32m/
-- **Archivo:** `ml-32m.zip` (~250 MB comprimido, ~1 GB descomprimido)
-- **Contenido:** 32.000.204 ratings, 200.948 usuarios, 87.585 películas, enero 1995 – octubre 2023.
-- **Licencia:** uso académico (ver `README.txt` del dataset).
+- **Official source:** https://grouplens.org/datasets/movielens/32m/
+- **Alternative link:** https://drive.google.com/drive/folders/1RB8vg3Sc2HD2XlrOCdaUIwm5cEbPXRQ4?usp=sharing
+- **Archive:** `ml-32m.zip` (~250 MB compressed, ~1 GB uncompressed)
+- **Contents:** 32,000,204 ratings, 200,948 users, 87,585 movies, January 1995 – October 2023.
+- **License:** academic use (see `README.txt` inside the dataset).
 
-### Descarga y ubicación
+### Download and Setup
 
-1. Descarga `ml-32m.zip` desde la fuente oficial o el enlace alternativo.
-2. Descomprímelo en la carpeta `dataSet/` con la siguiente estructura:
+1. Download `ml-32m.zip` from the official source or the alternative link.
+2. Extract it into the `dataSet/` folder with the following structure:
 
 ```text
 Machine_Learning/
@@ -52,46 +54,46 @@ Machine_Learning/
 
 ---
 
-## Configuración del Entorno
+## Environment Setup
 
-Crear y activar el entorno virtual e instalar las dependencias desde `requirements.txt`:
+Create and activate the virtual environment and install dependencies from `requirements.txt`:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate      # En Windows: .venv\Scripts\activate
+source .venv/bin/activate      # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
 ---
 
-## Comandos de Reproducción
+## Reproduction Commands
 
-1. **Generar particiones reproducibles (`data/splits.json`):**
+1. **Generate reproducible splits (`data/splits.json`):**
 
 ```bash
 .venv/bin/python -m src.data_loader
 ```
 
-2. **Entrenar y evaluar los modelos base (regresión y clasificación):**
+2. **Train and evaluate baseline models (regression and classification):**
 
 ```bash
 .venv/bin/python -m src.baselines
 ```
 
-Esto imprime las métricas en consola y guarda los gráficos en `runs/`:
-- `runs/residuals_regression.png` — análisis de residuales ($y - \hat{y}$) para los modelos de regresión.
-- `runs/confusion_matrices.png` — matrices de confusión para los clasificadores sobre `like`.
+This prints all metrics to the console and saves the diagnostic plots in `runs/`:
+- `runs/residuals_regression.png` — residual analysis ($y - \hat{y}$) for the regression models.
+- `runs/confusion_matrices.png` — confusion matrices for the `like` classifiers.
 
-3. **Análisis Exploratorio de Datos (EDA):**
-   - Abrir y ejecutar `notebooks/eda.ipynb` seleccionando el kernel `.venv`.
+3. **Exploratory Data Analysis (EDA):**
+   - Open and run `notebooks/eda.ipynb` using the `.venv` kernel.
 
 ---
 
-## Métricas más importantes para la tarea
+## Most Important Metrics for the Task
 
-- **Regresión (`rating` en escala 0.5–5.0):**
-  - **RMSE / MSE** y **MAE** son las métricas principales porque miden directamente el error en estrellas de la predicción de `rating` (RMSE penaliza más los errores grandes, mientras MAE refleja el error típico absoluto).
-  - **$R^2$** complementa la lectura indicando qué proporción de la varianza de los ratings explica cada modelo respecto a predecir la media global.
-- **Clasificación binaria (`like = 1` si `rating >= 4.0`):**
-  - **AUC-ROC** es la métrica más importante porque evalúa la capacidad de ordenamiento/discriminación del modelo entre ítems que gustarán y los que no a través de todos los umbrales de probabilidad, lo cual es clave en recomendación.
-  - **F1-score** (junto con **precisión** y **recall**) es fundamental para equilibrar falsos positivos (recomendar películas que no gustan) y falsos negativos (omitir películas relevantes), siendo más informativa que `accuracy` cuando las clases no están perfectamente balanceadas.
+- **Regression (`rating` on the 0.5–5.0 scale):**
+  - **RMSE / MSE** and **MAE** are the primary metrics because they directly measure rating prediction error in stars (RMSE penalizes larger errors more heavily, while MAE reflects typical absolute error).
+  - **$R^2$** complements these by showing how much of the rating variance each model explains compared to predicting the global mean.
+- **Binary Classification (`like = 1` if `rating >= 4.0`):**
+  - **AUC-ROC** is the most important metric because it evaluates ranking/discrimination ability between liked and disliked items across all probability thresholds, which is essential for recommendation.
+  - **F1-score** (alongside **precision** and **recall**) balances false positives (recommending movies the user dislikes) and false negatives (missing relevant movies), making it more informative than `accuracy` under class imbalance.

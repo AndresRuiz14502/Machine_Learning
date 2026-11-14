@@ -1,4 +1,4 @@
-"""Carga, preprocesamiento y partición temporal de MovieLens 32M."""
+"""Loading, preprocessing, and temporal splitting of MovieLens 32M."""
 
 import json
 import random
@@ -7,12 +7,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# === Reproducibilidad: una única semilla para todo el proyecto ===
+# === Reproducibility: single global seed across the project ===
 SEED = 42
 
-# === Hiperparámetros de escala y de preparación de datos ===
-N_USERS_SAMPLE = 15_000       # factorización (holgado en 16 GB)
-N_USERS_SAMPLE_TREES = 6_000  # baselines con árboles/GBM
+# === Scale and data preparation hyperparameters ===
+N_USERS_SAMPLE = 15_000       # matrix factorization (fits comfortably in 16 GB RAM)
+N_USERS_SAMPLE_TREES = 6_000  # tree/GBM baselines
 
 MIN_RATINGS_PER_USER = 10
 MIN_RATINGS_PER_ITEM = 10
@@ -35,13 +35,13 @@ DEFAULT_SPLITS_PATH = PROJECT_ROOT / "data" / "splits.json"
 
 
 def set_seed(seed: int = SEED) -> None:
-    """Fija las semillas globales de Python y NumPy."""
+    """Set global Python and NumPy random seeds."""
     random.seed(seed)
     np.random.seed(seed)
 
 
 def resolve_data_dir(candidate_paths=None) -> Path:
-    """Resuelve automáticamente la ruta del dataset."""
+    """Automatically resolve the dataset directory path."""
     if candidate_paths is None:
         candidate_paths = [
             Path(r"C:\Users\andre\OneDrive\Documentos\TranajosML\Workshop1\dataSet"),
@@ -51,13 +51,13 @@ def resolve_data_dir(candidate_paths=None) -> Path:
     data_dir = next((p for p in candidate_paths if (p / "ratings.csv").exists()), None)
     if data_dir is None:
         raise FileNotFoundError(
-            "No se encontró 'ratings.csv'. Edita CANDIDATE_PATHS con la ruta correcta de tu dataSet."
+            "'ratings.csv' not found. Update CANDIDATE_PATHS with the correct path to your dataSet."
         )
     return data_dir
 
 
 def load_raw_data(data_dir: Path | None = None, load_links_tags: bool = True):
-    """Carga los CSV crudos de MovieLens 32M y extrae columnas temporales."""
+    """Load raw MovieLens 32M CSVs and extract temporal columns."""
     if data_dir is None:
         data_dir = resolve_data_dir()
 
@@ -82,7 +82,7 @@ def load_raw_data(data_dir: Path | None = None, load_links_tags: bool = True):
 
 
 def sample_users(ratings: pd.DataFrame, n_users_sample: int = N_USERS_SAMPLE, seed: int = SEED):
-    """Muestrea usuarios completos para no partir perfiles."""
+    """Sample complete users to avoid splitting user profiles."""
     all_users = ratings["userId"].unique()
     rng = np.random.default_rng(seed)
     if n_users_sample < len(all_users):
@@ -93,7 +93,7 @@ def sample_users(ratings: pd.DataFrame, n_users_sample: int = N_USERS_SAMPLE, se
 
 
 def filter_min_support(data: pd.DataFrame, min_u: int, min_i: int, max_iter: int = 10) -> pd.DataFrame:
-    """Filtra iterativamente usuarios/ítems con poco soporte hasta estabilizar."""
+    """Iteratively filter low-support users/items until convergence."""
     prev = None
     for _ in range(max_iter):
         uc = data["userId"].value_counts()
@@ -107,7 +107,7 @@ def filter_min_support(data: pd.DataFrame, min_u: int, min_i: int, max_iter: int
 
 
 def build_contiguous_ids(df: pd.DataFrame):
-    """Asigna índices contiguos u (0..N_U-1) e i (0..N_I-1)."""
+    """Assign contiguous indices u (0..N_U-1) and i (0..N_I-1)."""
     user_ids = df["userId"].unique()
     item_ids = df["movieId"].unique()
 
@@ -122,7 +122,7 @@ def build_contiguous_ids(df: pd.DataFrame):
 
 
 def temporal_split(data: pd.DataFrame, test_frac: float = TEST_FRACTION, val_frac: float = VAL_FRACTION):
-    """Corte cronológico global: train (pasado) / val / test (futuro reciente)."""
+    """Global chronological split: train (past) / val / test (recent future)."""
     data = data.sort_values("timestamp", kind="mergesort").reset_index(drop=True)
     n = len(data)
     n_test = int(n * test_frac)
@@ -135,13 +135,13 @@ def temporal_split(data: pd.DataFrame, test_frac: float = TEST_FRACTION, val_fra
 
 
 def report_and_clean(name: str, part: pd.DataFrame, train_users: set, train_items: set, verbose: bool = True) -> pd.DataFrame:
-    """Retira usuarios/ítems en val/test no vistos en train para evitar cold-start en evaluación."""
+    """Remove val/test users/items unseen in train to avoid cold-start in evaluation."""
     mask_known = part["u"].isin(train_users) & part["i"].isin(train_items)
     cold = int((~mask_known).sum())
     if verbose:
         print(
-            f"{name}: {cold:,} filas con usuario/ítem no visto en train "
-            f"({cold/len(part)*100:.2f}%) -> se retiran para evaluación limpia"
+            f"{name}: {cold:,} rows with user/item unseen in train "
+            f"({cold/len(part)*100:.2f}%) -> removed for clean evaluation"
         )
     return part[mask_known].copy()
 
@@ -153,7 +153,7 @@ def save_splits(
     test_df: pd.DataFrame,
     splits_path: Path = DEFAULT_SPLITS_PATH,
 ) -> Path:
-    """Guarda los parámetros, usuarios muestreados e índices de partición en JSON."""
+    """Save split parameters, sampled users, and split indices to JSON."""
     splits_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "seed": SEED,
@@ -186,7 +186,7 @@ def save_splits(
 
 
 def load_splits(splits_path: Path = DEFAULT_SPLITS_PATH) -> dict:
-    """Carga el archivo de particiones data/splits.json."""
+    """Load the data/splits.json split file."""
     with open(splits_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -197,19 +197,19 @@ def prepare_datasets(
     save_splits_file: bool = False,
     verbose: bool = True,
 ):
-    """Ejecuta el flujo completo de carga, submuestreo, filtrado, IDs contiguos y split temporal."""
+    """Run the full pipeline: loading, subsampling, filtering, contiguous IDs, and temporal split."""
     set_seed(SEED)
     ratings, movies = load_raw_data(data_dir=data_dir, load_links_tags=False)
 
     df, sampled_users = sample_users(ratings, N_USERS_SAMPLE, SEED)
     if verbose:
-        print(f"Submuestra: {len(sampled_users):,} usuarios -> {len(df):,} ratings.")
+        print(f"Subsample: {len(sampled_users):,} users -> {len(df):,} ratings.")
 
     before = len(df)
     df = filter_min_support(df, MIN_RATINGS_PER_USER, MIN_RATINGS_PER_ITEM)
     if verbose:
-        print(f"Ratings: {before:,} -> {len(df):,} (eliminados {before - len(df):,})")
-        print(f"Usuarios: {df['userId'].nunique():,}  |  Películas: {df['movieId'].nunique():,}")
+        print(f"Ratings: {before:,} -> {len(df):,} (removed {before - len(df):,})")
+        print(f"Users: {df['userId'].nunique():,}  |  Movies: {df['movieId'].nunique():,}")
 
     df, user2idx, item2idx, idx2item = build_contiguous_ids(df)
     df["like"] = (df["rating"] >= LIKE_THRESHOLD).astype("int8")
@@ -222,12 +222,12 @@ def prepare_datasets(
     test_df = report_and_clean("test", test_df, train_users, train_items, verbose=verbose)
 
     if verbose:
-        print(f"Tamaños finales -> train: {len(train_df):,} | val: {len(val_df):,} | test: {len(test_df):,}")
+        print(f"Final sizes -> train: {len(train_df):,} | val: {len(val_df):,} | test: {len(test_df):,}")
 
     if save_splits_file and splits_path is not None:
         out = save_splits(sampled_users, train_df, val_df, test_df, splits_path=splits_path)
         if verbose:
-            print(f"Particiones guardadas en: {out}")
+            print(f"Splits saved to: {out}")
 
     return {
         "train_df": train_df,
