@@ -1,0 +1,102 @@
+"""
+Unit tests for Workshop 3 MovieLensRecEnv (Gymnasium API & MDP invariants).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from workshop3.src.env import MovieLensRecEnv
+
+
+def test_env_spaces_and_reset() -> None:
+    env = MovieLensRecEnv(split="train", horizon=10, seed=42)
+    assert env.action_space.n == 50
+    assert env.observation_space.shape == (250,)
+    assert env.observation_space.dtype == np.float32
+
+    obs, info = env.reset(seed=42)
+    assert isinstance(obs, np.ndarray)
+    assert obs.shape == (250,)
+    assert obs.dtype == np.float32
+    assert env.observation_space.contains(obs)
+    assert "valid_mask" in info
+    assert info["valid_mask"].shape == (50,)
+    assert np.all(info["valid_mask"] == 1.0)
+    assert isinstance(info["user_idx"], int)
+
+
+def test_env_step_and_visited_mask() -> None:
+    env = MovieLensRecEnv(split="val", horizon=10, seed=123)
+    obs, info = env.reset(seed=123)
+
+    obs1, reward1, terminated1, truncated1, info1 = env.step(0)
+    assert obs1.shape == (250,)
+    assert env.observation_space.contains(obs1)
+    assert isinstance(reward1, float)
+    assert np.isfinite(reward1)
+    assert isinstance(terminated1, bool)
+    assert isinstance(truncated1, bool)
+
+    # Action 0 should now be marked visited in state [150:200] and invalid in valid_mask
+    assert obs1[150 + 0] == pytest.approx(1.0)
+    assert info1["valid_mask"][0] == pytest.approx(0.0)
+    assert np.sum(info1["valid_mask"]) == pytest.approx(49.0)
+
+
+def test_repeated_action_penalty() -> None:
+    env = MovieLensRecEnv(split="test", horizon=10, seed=99)
+    env.reset(seed=99)
+
+    env.step(5)
+    # Repeating action 5 must yield -1.5 penalty and is_hit = 0
+    obs2, reward2, terminated2, truncated2, info2 = env.step(5)
+    assert reward2 == pytest.approx(-1.5)
+    assert info2["is_hit"] == 0
+    assert env.observation_space.contains(obs2)
+
+
+def test_early_termination_on_five_consecutive_misses() -> None:
+    env = MovieLensRecEnv(split="train", horizon=10, seed=7)
+    env.reset(seed=7, options={"user_idx": int(env.split_user_indices[0])})
+
+    # Find 5 disliked candidate actions for this user
+    u = env.u
+    disliked_actions = np.where(env.cand_is_liked[u] != 1)[0][:5]
+    assert len(disliked_actions) == 5
+
+    for idx, act in enumerate(disliked_actions):
+        obs, reward, terminated, truncated, info = env.step(int(act))
+        if idx < 4:
+            assert not terminated
+            assert not truncated
+        else:
+            assert terminated is True
+            assert env.t == 5
+            assert info["consecutive_misses"] == 5
+
+
+def test_full_horizon_truncation_and_render() -> None:
+    env = MovieLensRecEnv(split="test", horizon=10, seed=42)
+    env.reset(seed=42, options={"user_idx": int(env.split_user_indices[0])})
+    u = env.u
+
+    # Pick 10 liked actions so episode never terminates early
+    liked_actions = np.where(env.cand_is_liked[u] == 1)[0][:10]
+    assert len(liked_actions) == 10
+
+    for idx, act in enumerate(liked_actions):
+        obs, reward, terminated, truncated, info = env.step(int(act))
+        assert info["is_hit"] == 1
+        assert reward > 0.9
+        if idx < 9:
+            assert not terminated
+            assert not truncated
+        else:
+            assert not terminated
+            assert truncated is True
+
+    rendered = env.render()
+    assert "MovieLensRecEnv Trajectory" in rendered
+    assert "HIT" in rendered

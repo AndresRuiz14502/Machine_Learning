@@ -1,0 +1,56 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage[T1]{fontenc}
+\usepackage{cite}
+\usepackage[cmex10]{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{arrows,arrows.meta,positioning,shapes,calc,fit}
+
+\title{Deep Reinforcement Learning for Sequential Movie Recommendation on the MovieLens 32M Dataset}
+
+\author{
+\IEEEauthorblockN{Andr\'es Felipe Ruiz Vasallo}
+\IEEEauthorblockA{\textit{Team 7}\\
+\textit{Universidad Distrital Francisco Jos\'e de Caldas}\\
+afruizv@udistrital.edu.co}
+\and
+\IEEEauthorblockN{Josep Emanuel Le\'on Joya}
+\IEEEauthorblockA{\textit{Team 7}\\
+\textit{Universidad Distrital Francisco Jos\'e de Caldas}\\
+jeleonj@udistrital.edu.co}
+\and
+\IEEEauthorblockN{Matthew Stev Toro Mondrag\'on}
+\IEEEauthorblockA{\textit{Team 7}\\
+\textit{Universidad Distrital Francisco Jos\'e de Caldas}\\
+mstorom@udistrital.edu.co}
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Recommender systems on large streaming catalogs must optimize sequential user satisfaction across multi-step browsing sessions rather than isolated pointwise rating predictions. Building upon our Workshop~1 supervised matrix factorization study on the MovieLens~32M dataset (32~million ratings across 200,948 users and 84,432 movies), this work formulates personalized top-$K$ movie recommendation as a finite-horizon Markov Decision Process (MDP) and implements a custom \texttt{Gymnasium} environment alongside a Dueling Double Deep Q-Network (D3QN) agent. Preserving the exact leak-free chronological split (15,000 sampled users, 2,368,980 filtered ratings across 14,998 users and 11,589 movies), the environment represents each session state as a 250-dimensional vector integrating dynamic intra-session preference similarity, static FunkSVD latent factors, self-information novelty, and visited-action masks over $M=50$ candidate slots, guided by a composite reward function that balances relevance, long-tail novelty, and genre diversity while penalizing repetitions and modelling user abandonment after five consecutive misses. After validating the simulator across 100 random-policy diagnostic episodes and conducting an eight-configuration hyperparameter search over learning rate, discount factor, exploration decay, and $L_2$ regularization, our tuned D3QN agent ($\eta=5\times 10^{-4}$, $\gamma=0.95$, $\delta_\epsilon=0.995$, $\lambda_{L_2}=10^{-5}$) achieves a test return of $12.3674$, Precision@10 of $0.9792$, NDCG@10 of $0.9818$, and MAP@10 of $0.9692$, substantially outperforming random, bias, popularity, static greedy FunkSVD ($\text{NDCG@10}=0.2785$), and myopic contextual bandit ($\gamma=0$, $\text{NDCG@10}=0.8924$) baselines while expanding catalog coverage from Workshop~1's $8.00\%$ bottleneck to $36.64\%$ at $K=10$ and $60.35\%$ at $K=20$.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Reinforcement learning, Markov decision process, Dueling Double DQN, sequential recommendation, MovieLens 32M, reward shaping, popularity bias.
+\end{IEEEkeywords}
+
+\input{sections/sec1_intro}
+\input{sections/sec2_mdp}
+\input{sections/sec3_methods}
+\input{sections/sec4_results}
+\input{sections/sec5_discussion}
+
+\bibliographystyle{IEEEtran}
+\bibliography{bibliography}
+
+\end{document}
