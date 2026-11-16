@@ -1,0 +1,217 @@
+{
+  "checkpoint_epoch": 15,
+  "checkpoint_phase": "Phase 2 (Full Fine-Tuning)",
+  "best_val_rmse": 0.7497687778086634,
+  "decision_threshold": 3.475,
+  "hybrid_test_metrics": {
+    "RMSE": 0.7994010754613106,
+    "MSE": 0.6390420794487,
+    "MAE": 0.5975666642189026,
+    "R2": 0.3570735454559326,
+    "accuracy": 0.7156384017663794,
+    "precision": 0.5838001244776385,
+    "recall": 0.765089722675367,
+    "f1": 0.6622623430329315,
+    "roc_auc": 0.7942019932158715
+  },
+  "bootstrap_95ci": {
+    "RMSE_95CI": [
+      0.7900600135326385,
+      0.8092324420809746
+    ],
+    "MAE_95CI": [
+      0.5907426923513412,
+      0.6050514802336693
+    ],
+    "F1_95CI": [
+      0.6040214455304203,
+      0.6221409624466608
+    ],
+    "AUC_95CI": [
+      0.7883493538628334,
+      0.8001494363775454
+    ]
+  },
+  "regression_comparison": {
+    "HybridNeuMF (W2 Deep CF)": {
+      "RMSE": 0.7994,
+      "MSE": 0.639,
+      "MAE": 0.5976,
+      "R2": 0.3571
+    },
+    "kNN item-item (W1)": {
+      "RMSE": 0.8287,
+      "MSE": 0.6867,
+      "MAE": 0.6144,
+      "R2": 0.3091
+    },
+    "Lasso (W1)": {
+      "RMSE": 0.8727,
+      "MSE": 0.7616,
+      "MAE": 0.655,
+      "R2": 0.2337
+    },
+    "Ridge (W1)": {
+      "RMSE": 0.873,
+      "MSE": 0.7621,
+      "MAE": 0.6552,
+      "R2": 0.2332
+    },
+    "RandomForest (W1)": {
+      "RMSE": 0.8778,
+      "MSE": 0.7705,
+      "MAE": 0.6529,
+      "R2": 0.2248
+    },
+    "GradientBoosting (W1)": {
+      "RMSE": 0.8868,
+      "MSE": 0.7864,
+      "MAE": 0.6614,
+      "R2": 0.2088
+    },
+    "Bias (mu+bu+bi) (W1)": {
+      "RMSE": 0.8966,
+      "MSE": 0.8039,
+      "MAE": 0.668,
+      "R2": 0.1912
+    },
+    "DecisionTree (W1)": {
+      "RMSE": 0.9061,
+      "MSE": 0.821,
+      "MAE": 0.6741,
+      "R2": 0.174
+    },
+    "GlobalMean (W1)": {
+      "RMSE": 1.0212,
+      "MSE": 1.0428,
+      "MAE": 0.7686,
+      "R2": -0.0492
+    }
+  },
+  "classification_comparison": {
+    "HybridNeuMF (W2 Deep CF)": {
+      "Accuracy": 0.7156,
+      "Precision": 0.5838,
+      "Recall": 0.7651,
+      "F1": 0.6623,
+      "ROC_AUC": 0.7942
+    },
+    "RandomForestClf (W1)": {
+      "Accuracy": 0.7031,
+      "Precision": 0.5773,
+      "Recall": 0.6914,
+      "F1": 0.6293,
+      "ROC_AUC": 0.7645
+    },
+    "Bias Threshold (W1)": {
+      "Accuracy": 0.7128,
+      "Precision": 0.6721,
+      "Recall": 0.4139,
+      "F1": 0.5123,
+      "ROC_AUC": 0.7607
+    },
+    "LogisticRegression (W1)": {
+      "Accuracy": 0.7134,
+      "Precision": 0.6026,
+      "Recall": 0.627,
+      "F1": 0.6146,
+      "ROC_AUC": 0.7604
+    },
+    "Ridge Threshold (W1)": {
+      "Accuracy": 0.6987,
+      "Precision": 0.7089,
+      "Recall": 0.2938,
+      "F1": 0.4154,
+      "ROC_AUC": 0.759
+    },
+    "GradientBoostingClf (W1)": {
+      "Accuracy": 0.6979,
+      "Precision": 0.5697,
+      "Recall": 0.6986,
+      "F1": 0.6276,
+      "ROC_AUC": 0.7518
+    },
+    "GlobalMean (W1)": {
+      "Accuracy": 0.6356,
+      "Precision": 0.0,
+      "Recall": 0.0,
+      "F1": 0.0,
+      "ROC_AUC": 0.5
+    }
+  },
+  "ranking_comparison": {
+    "HybridNeuMF (W2 Deep CF)": {
+      "P@10": 0.4618,
+      "R@10": 0.3579,
+      "NDCG@10": 0.7663,
+      "MAP@10": 0.4553,
+      "HitRate@10": 0.9266
+    },
+    "Popularity (W1)": {
+      "P@10": 0.393,
+      "R@10": 0.2728,
+      "NDCG@10": 0.6726,
+      "MAP@10": 0.3624,
+      "HitRate@10": 0.8471
+    },
+    "Bias (W1)": {
+      "P@10": 0.2786,
+      "R@10": 0.1983,
+      "NDCG@10": 0.5209,
+      "MAP@10": 0.1911,
+      "HitRate@10": 0.7951
+    }
+  },
+  "user_slice_analysis": [
+    {
+      "Slice": "Low Activity Users",
+      "Count": 7861,
+      "RMSE": 0.9151,
+      "MAE": 0.6934,
+      "F1": 0.6853,
+      "ROC_AUC": 0.7512
+    },
+    {
+      "Slice": "Medium Activity Users",
+      "Count": 8440,
+      "RMSE": 0.6906,
+      "MAE": 0.5101,
+      "F1": 0.6938,
+      "ROC_AUC": 0.8094
+    },
+    {
+      "Slice": "Power Users",
+      "Count": 7250,
+      "RMSE": 0.7827,
+      "MAE": 0.5955,
+      "F1": 0.5164,
+      "ROC_AUC": 0.7604
+    }
+  ],
+  "item_slice_analysis": [
+    {
+      "Slice": "Long-Tail Movies",
+      "Count": 7880,
+      "RMSE": 0.8093,
+      "MAE": 0.6079,
+      "F1": 0.5972,
+      "ROC_AUC": 0.7759
+    },
+    {
+      "Slice": "Mid-Popularity Movies",
+      "Count": 7834,
+      "RMSE": 0.7969,
+      "MAE": 0.592,
+      "F1": 0.6535,
+      "ROC_AUC": 0.8083
+    },
+    {
+      "Slice": "Blockbuster Movies",
+      "Count": 7837,
+      "RMSE": 0.7919,
+      "MAE": 0.5928,
+      "F1": 0.7054,
+      "ROC_AUC": 0.7829
+    }
+  ]
+}
