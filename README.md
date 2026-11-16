@@ -1,8 +1,8 @@
-# Workshop 1 — MovieLens 32M Recommendation System
+# MovieLens 32M Recommendation System — Workshops 1 & 2
 
-Machine Learning Workshop: exploratory data analysis, data preparation,
-feature engineering, and evaluation of supervised baseline models on
-MovieLens 32M.
+Machine Learning course project (Team 7, Universidad Distrital Francisco José de Caldas):
+- **Workshop 1:** Exploratory data analysis (EDA), leak-free chronological splitting, feature engineering, and classical supervised baselines (Popularity, Bias, Item-Item kNN, Ridge, Lasso, Decision Tree, Random Forest, Gradient Boosting, and Logistic Regression).
+- **Workshop 2:** Deep Collaborative Filtering (`HybridNeuMF` + `BiasedMatrixFactorization`) in PyTorch with two-phase Transfer Learning & Fine-Tuning, TensorBoard experiment tracking, held-out test set evaluation, and checkpoint verification.
 
 ---
 
@@ -12,61 +12,91 @@ MovieLens 32M.
 Machine_Learning/
 ├── src/
 │   ├── __init__.py
-│   ├── data_loader.py     # Loading, subsampling, filtering, contiguous IDs, and temporal split
-│   ├── features.py        # Feature engineering (user/item stats, biases, genres, movie age)
-│   └── baselines.py       # Training and evaluation of baseline models (regression & classification)
+│   ├── data_loader.py     # Loading, subsampling, min-support filtering, contiguous IDs, and temporal split
+│   ├── features.py        # Leak-free feature engineering (user/item stats, biases, genres, movie age)
+│   ├── baselines.py       # Workshop 1 baseline models (regression, binary classification, and ranking)
+│   ├── model.py           # Workshop 2 PyTorch architectures (BiasedMatrixFactorization & HybridNeuMF)
+│   ├── train.py           # Workshop 2 training pipeline (pretraining, 2-phase fine-tuning, TensorBoard logs)
+│   ├── evaluate.py        # Workshop 2 held-out test set evaluation & comparison vs. Workshop 1 baselines
+│   └── test_model.py      # Checkpoint loader (checkpoints/model_best.pt) and inference verification script
 ├── notebooks/
-│   └── eda.ipynb          # Full EDA notebook with visualizations and analysis
+│   └── eda.ipynb          # Workshop 1 EDA notebook with visualizations and statistical analysis
 ├── data/
-│   └── splits.json        # Train/validation/test split indices and metadata for reproducibility
-├── dataSet/               # Raw MovieLens 32M data (not tracked in Git)
-├── checkpoints/           # Saved model weights (future workshops)
-├── runs/                  # Evaluation logs and plots (residuals and confusion matrices)
+│   └── splits.json        # Reproducible train/validation/test split indices and metadata (SEED = 42)
+├── dataSet/               # Raw MovieLens 32M CSV files (ratings.csv, movies.csv, tags.csv, links.csv)
+├── checkpoints/
+│   └── model_best.pt      # Best validation-RMSE HybridNeuMF model checkpoint and configuration
+├── runs/                  # TensorBoard event logs, training history CSV/JSON, learning curves, and plots
+├── group7_workshop2.pdf   # Workshop 2 Technical Report (IEEE format)
 ├── requirements.txt       # Pinned virtual environment dependencies
 └── README.md
 ```
 
 ---
 
-## Dataset
+## Dataset Setup
 
 **MovieLens 32M** (GroupLens Research, University of Minnesota).
-
 - **Official source:** https://grouplens.org/datasets/movielens/32m/
-- **Alternative link:** https://drive.google.com/drive/folders/1RB8vg3Sc2HD2XlrOCdaUIwm5cEbPXRQ4?usp=sharing
-- **Archive:** `ml-32m.zip` (~250 MB compressed, ~1 GB uncompressed)
-- **Contents:** 32,000,204 ratings, 200,948 users, 87,585 movies, January 1995 – October 2023.
-- **License:** academic use (see `README.txt` inside the dataset).
-
-### Download and Setup
-
-1. Download `ml-32m.zip` from the official source or the alternative link.
-2. Extract it into the `dataSet/` folder with the following structure:
-
-```text
-Machine_Learning/
-└── dataSet/
-    ├── ratings.csv    # userId, movieId, rating, timestamp
-    ├── movies.csv     # movieId, title, genres
-    ├── tags.csv       # userId, movieId, tag, timestamp
-    └── links.csv      # movieId, imdbId, tmdbId
-```
+- **Contents:** 32,000,204 ratings (`0.5` to `5.0` stars in `0.5` increments), 200,948 users, 87,585 movies (January 1995 – October 2023).
+- Extract `ml-32m.zip` into the `dataSet/` directory (`dataSet/ratings.csv`, `dataSet/movies.csv`, `dataSet/tags.csv`, `dataSet/links.csv`).
 
 ---
 
 ## Environment Setup
 
-Create and activate the virtual environment and install dependencies from `requirements.txt`:
-
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate      # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt
 ```
 
 ---
 
-## Reproduction Commands
+## Workshop 2 — Reproduction Commands
+
+All Workshop 2 scripts use the fixed global seed (`SEED = 42`) and the identical leak-free chronological split (`train: 1,895,184 | val: 33,092 | test: 23,551` across `14,998` users and `11,589` movies) defined in `src/data_loader.py`.
+
+1. **Verify the model architecture and forward pass (`src/model.py`):**
+
+```bash
+.venv/bin/python -m src.model
+```
+
+2. **Train `HybridNeuMF` with Transfer Learning & Two-Phase Fine-Tuning (`src/train.py`):**
+
+```bash
+.venv/bin/python -m src.train
+```
+
+- **Stage 0 (Pretraining):** Trains `BiasedMatrixFactorization` (`GMF_DIM = 64`) on the training split using Nesterov SGD with per-observation $L_2$ regularization (`reg = 0.045`).
+- **Phase 1 (Frozen Pretrained Backbone, 5 epochs):** Transfers the pretrained GMF user/item embeddings and biases into `HybridNeuMF`, freezes them (`requires_grad = False`), and trains the content-aware `genre_proj` layer, `mlp_tower` (`128 -> 64 -> 32` with `BatchNorm1d`, `GELU`, `Dropout(0.30)`), and `fusion_head` using `AdamW` with exponential learning rate decay.
+- **Phase 2 (Full Fine-Tuning, 10 epochs):** Unfreezes all layers (`requires_grad = True`) and jointly fine-tunes the entire network with a reduced learning rate governed by `CosineAnnealingLR`.
+- Saves the best validation checkpoint to `checkpoints/model_best.pt`, logs epoch metrics to TensorBoard (`runs/hybrid_neumf_experiment/`) and `runs/training_history.csv`, and exports learning curves to `runs/learning_curves.png`.
+
+3. **Evaluate on the held-out test set and compare against Workshop 1 baselines (`src/evaluate.py`):**
+
+```bash
+.venv/bin/python -m src.evaluate
+```
+
+Computes test-set regression metrics (`RMSE`, `MSE`, `MAE`, `$R^2$`), binary preference classification metrics (`like = 1` if `rating >= 4.0`: `Accuracy`, `Precision`, `Recall`, `F1-Score`, `ROC-AUC`), Top-10 ranking metrics (`P@10`, `R@10`, `NDCG@10`, `MAP@10`, `HitRate@10`), 95% bootstrap confidence intervals, and slice-based error analyses, saving all comparison tables and diagnostic figures in `runs/`.
+
+4. **Load `checkpoints/model_best.pt` and verify inference on unseen data (`src/test_model.py`):**
+
+```bash
+.venv/bin/python -m src.test_model
+```
+
+5. **Launch TensorBoard to inspect training logs:**
+
+```bash
+.venv/bin/tensorboard --logdir runs/
+```
+
+---
+
+## Workshop 1 — Reproduction Commands
 
 1. **Generate reproducible splits (`data/splits.json`):**
 
@@ -74,26 +104,8 @@ pip install -r requirements.txt
 .venv/bin/python -m src.data_loader
 ```
 
-2. **Train and evaluate baseline models (regression and classification):**
+2. **Train and evaluate Workshop 1 baseline models (`src/baselines.py`):**
 
 ```bash
 .venv/bin/python -m src.baselines
 ```
-
-This prints all metrics to the console and saves the diagnostic plots in `runs/`:
-- `runs/residuals_regression.png` — residual analysis ($y - \hat{y}$) for the regression models.
-- `runs/confusion_matrices.png` — confusion matrices for the `like` classifiers.
-
-3. **Exploratory Data Analysis (EDA):**
-   - Open and run `notebooks/eda.ipynb` using the `.venv` kernel.
-
----
-
-## Most Important Metrics for the Task
-
-- **Regression (`rating` on the 0.5–5.0 scale):**
-  - **RMSE / MSE** and **MAE** are the primary metrics because they directly measure rating prediction error in stars (RMSE penalizes larger errors more heavily, while MAE reflects typical absolute error).
-  - **$R^2$** complements these by showing how much of the rating variance each model explains compared to predicting the global mean.
-- **Binary Classification (`like = 1` if `rating >= 4.0`):**
-  - **AUC-ROC** is the most important metric because it evaluates ranking/discrimination ability between liked and disliked items across all probability thresholds, which is essential for recommendation.
-  - **F1-score** (alongside **precision** and **recall**) balances false positives (recommending movies the user dislikes) and false negatives (missing relevant movies), making it more informative than `accuracy` under class imbalance.
