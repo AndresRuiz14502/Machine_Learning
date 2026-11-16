@@ -1,0 +1,69 @@
+{
+  "latent_separability": [
+    {
+      "Representation": "Standard AE (z_dim=16)",
+      "Latent_Dim": 16,
+      "Silhouette_All_Test": 0.0277,
+      "Silhouette_Extreme_Ratings": 0.1008,
+      "Davies_Bouldin_Index": 3.9183
+    },
+    {
+      "Representation": "Denoising AE (z_dim=16)",
+      "Latent_Dim": 16,
+      "Silhouette_All_Test": 0.0292,
+      "Silhouette_Extreme_Ratings": 0.1078,
+      "Davies_Bouldin_Index": 3.7598
+    },
+    {
+      "Representation": "VAE (beta=0.5, mu)",
+      "Latent_Dim": 16,
+      "Silhouette_All_Test": 0.0109,
+      "Silhouette_Extreme_Ratings": 0.0525,
+      "Davies_Bouldin_Index": 6.7062
+    },
+    {
+      "Representation": "VAE (beta=1.0, mu)",
+      "Latent_Dim": 16,
+      "Silhouette_All_Test": 0.0302,
+      "Silhouette_Extreme_Ratings": 0.1062,
+      "Davies_Bouldin_Index": 4.7442
+    },
+    {
+      "Representation": "VAE (beta=4.0, mu)",
+      "Latent_Dim": 16,
+      "Silhouette_All_Test": 0.0927,
+      "Silhouette_Extreme_Ratings": 0.2674,
+      "Davies_Bouldin_Index": 2.064
+    },
+    {
+      "Representation": "W2 Supervised HybridNeuMF",
+      "Latent_Dim": 32,
+      "Silhouette_All_Test": 0.0086,
+      "Silhouette_Extreme_Ratings": 0.037,
+      "Davies_Bouldin_Index": 8.5356
+    }
+  ],
+  "silhouette_2d": [
+    {
+      "Model": "Standard AE (Unsupervised z)",
+      "Silhouette_2D_tSNE": 0.059,
+      "Silhouette_2D_UMAP": 0.0463,
+      "Silhouette_2D_tSNE_Extreme": 0.1801,
+      "Silhouette_2D_UMAP_Extreme": 0.1298
+    },
+    {
+      "Model": "Variational AE (beta=4.0, mu)",
+      "Silhouette_2D_tSNE": 0.0906,
+      "Silhouette_2D_UMAP": 0.1421,
+      "Silhouette_2D_tSNE_Extreme": 0.2193,
+      "Silhouette_2D_UMAP_Extreme": 0.3395
+    },
+    {
+      "Model": "W2 HybridNeuMF (Supervised Frozen)",
+      "Silhouette_2D_tSNE": 0.0185,
+      "Silhouette_2D_UMAP": 0.0145,
+      "Silhouette_2D_tSNE_Extreme": 0.0774,
+      "Silhouette_2D_UMAP_Extreme": 0.0577
+    }
+  ]
+}
