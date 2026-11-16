@@ -2,13 +2,19 @@
 Gymnasium environment for Sequential Movie Recommendation on MovieLens 32M (Workshop 3).
 
 Implements `MovieLensRecEnv(gymnasium.Env)` with:
-- Discrete(50) candidate slot action space
-- Box(250,) state space combining dynamic in-session latent similarity, static
-  FunkSVD scores, self-information novelty, visited action mask, user/session
-  20-D latent vectors, and 10 session progress scalars
-- Multi-objective reward function (relevance + rating bonus + novelty + genre diversity,
-  with repeat-action penalty and 5-miss user abandonment termination)
-- Random policy baseline verification and publication-quality diagnostic plotting (Figure 2)
+- Discrete(50) candidate slot action space. A slot holds one real rating of the session
+  (see `data_prep.py`); sessions shorter than 50 ratings are padded with invalid slots that
+  start masked (`valid_mask == 0`).
+- Box(250,) state space built only from training-split statistics and observed feedback:
+  cosine similarity between each candidate's FunkSVD item factor and the session vector,
+  static FunkSVD scores, self-information novelty, the unavailable-slot mask, the user's
+  FunkSVD factor, the session vector, and 10 session progress scalars. The session vector
+  starts at the user's FunkSVD factor and moves toward liked items and away from missed
+  ones (Rocchio-style feedback); no hidden label or future information enters the state.
+- Reward: relevance from the real rating (hit iff rating >= 4.0), plus novelty and genre
+  diversity bonuses paid only on hits; repeated or padding slots cost -1.5; the user
+  abandons the session after 5 consecutive misses.
+- Random policy verification and publication-quality diagnostic plotting (Figure 2).
 """
 
 from __future__ import annotations
@@ -25,6 +31,24 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CACHE_PATH = "workshop3/data/processed_cache.npz"
+
+LIKE_THRESHOLD = 4.0
+REPEAT_PENALTY = -1.5
+MISS_REWARD = -0.4
+NOVELTY_WEIGHT = 0.20
+DIVERSITY_WEIGHT = 0.10
+ABANDON_AFTER_MISSES = 5
+
+
+def resolve_repo_path(path: str | Path) -> Path:
+    """Return ``path`` unchanged if it exists (or is absolute), else resolve it against the repo root."""
+    candidate = Path(path)
+    if candidate.is_absolute() or candidate.exists():
+        return candidate
+    return REPO_ROOT / candidate
+
 
 class MovieLensRecEnv(gym.Env):
     """Sequential Movie Recommendation Gymnasium Environment on MovieLens 32M."""
@@ -33,20 +57,21 @@ class MovieLensRecEnv(gym.Env):
 
     def __init__(
         self,
-        cache_path: str = "workshop3/data/processed_cache.npz",
+        cache_path: str | Path = DEFAULT_CACHE_PATH,
         split: str = "train",
         horizon: int = 10,
         seed: int = 42,
         render_mode: Optional[str] = "ansi",
     ) -> None:
         super().__init__()
-        self.cache_path = str(cache_path)
+        resolved_cache = resolve_repo_path(cache_path)
+        self.cache_path = str(resolved_cache)
         self.split = split.lower()
         self.horizon = int(horizon)
         self.default_seed = int(seed)
         self.render_mode = render_mode
 
-        if not Path(self.cache_path).exists():
+        if not resolved_cache.exists():
             raise FileNotFoundError(
                 f"Processed cache not found at '{self.cache_path}'. "
                 f"Run `python workshop3/src/data_prep.py` first."
@@ -56,6 +81,7 @@ class MovieLensRecEnv(gym.Env):
         self.user_factors: np.ndarray = data["user_factors"].astype(np.float32)
         self.user_biases: np.ndarray = data["user_biases"].astype(np.float32)
         self.cand_items: np.ndarray = data["cand_items"].astype(np.int32)
+        self.cand_valid: np.ndarray = data["cand_valid"].astype(np.float32)
         self.cand_item_factors: np.ndarray = data["cand_item_factors"].astype(np.float32)
         self.cand_true_ratings: np.ndarray = data["cand_true_ratings"].astype(np.float32)
         self.cand_is_liked: np.ndarray = data["cand_is_liked"].astype(np.int8)
@@ -79,6 +105,12 @@ class MovieLensRecEnv(gym.Env):
         self.latent_dim = int(self.user_factors.shape[1])
         self.num_genres = int(self.cand_genres.shape[2])
 
+        min_valid = int(self.cand_valid[self.split_user_indices].sum(axis=1).min())
+        if min_valid < self.horizon:
+            raise ValueError(
+                f"Split '{self.split}' has a session with {min_valid} valid slots (< horizon {self.horizon})."
+            )
+
         # Load optional movie title lookup for human-readable trajectory rendering
         lookup_path = Path(self.cache_path).parent / "movie_lookup.json"
         if lookup_path.exists():
@@ -87,19 +119,8 @@ class MovieLensRecEnv(gym.Env):
         else:
             self.movie_lookup = {}
 
-        # Precompute L2-normalized user factors and per-user session target centroids
         u_norms = np.linalg.norm(self.user_factors, axis=1, keepdims=True) + 1e-8
         self.user_factors_norm = (self.user_factors / u_norms).astype(np.float32)
-
-        n_pool = len(self.user_factors)
-        self.u_target_vecs = np.zeros((n_pool, self.latent_dim), dtype=np.float32)
-        for u_idx in range(n_pool):
-            liked_mask = self.cand_is_liked[u_idx] == 1
-            if np.any(liked_mask):
-                mean_vec = np.mean(self.cand_item_factors[u_idx, liked_mask], axis=0)
-            else:
-                mean_vec = self.user_factors_norm[u_idx]
-            self.u_target_vecs[u_idx] = mean_vec / (np.linalg.norm(mean_vec) + 1e-8)
 
         self.action_space = spaces.Discrete(self.num_candidates)
         self.observation_space = spaces.Box(
@@ -122,17 +143,17 @@ class MovieLensRecEnv(gym.Env):
     def _get_obs(self) -> np.ndarray:
         """Assemble the 250-dimensional state vector s_t."""
         u = self.u
-        # [0:50] dynamic cosine similarity between session_vec and candidate item factors
+        # [0:50] cosine similarity between the session vector and each candidate's FunkSVD factor
         sim_scores = (self.cand_item_factors[u] @ self.session_vec).astype(np.float32)
-        # [50:100] static normalized SVD scores
+        # [50:100] static normalized FunkSVD scores
         svd_scores = self.cand_svd_scores[u]
         # [100:150] candidate novelty in [0, 1]
         nov_scores = self.cand_novelty[u]
-        # [150:200] visited mask (1.0 if already recommended, 0.0 if available)
+        # [150:200] unavailable mask (1.0 if already recommended or padding, 0.0 if available)
         visited_mask = self.visited
         # [200:220] normalized static user factor p_u
         pu_norm = self.user_factors_norm[u]
-        # [220:240] current dynamic session vector \bar{q}_t
+        # [220:240] current session vector \bar{q}_t
         sess_vec = self.session_vec
 
         # [240:250] 10 session summary scalars
@@ -153,7 +174,7 @@ class MovieLensRecEnv(gym.Env):
                 float(self.t) / float(self.horizon),
                 float(self.hits_so_far) / float(max(1, self.t)),
                 float(np.clip(self.last_reward, -2.0, 2.0)),
-                float(self.consecutive_misses) / 5.0,
+                float(self.consecutive_misses) / float(ABANDON_AFTER_MISSES),
                 mean_nov_so_far,
                 genre_cov_so_far,
                 user_bias_norm,
@@ -177,6 +198,14 @@ class MovieLensRecEnv(gym.Env):
         ).astype(np.float32)
         return np.clip(obs, -5.0, 5.0)
 
+    def _info(self) -> Dict[str, Any]:
+        return {
+            "valid_mask": (1.0 - self.visited).astype(np.float32),
+            "user_idx": int(self.u),
+            "num_liked_in_pool": int(np.sum(self.cand_is_liked[self.u] == 1)),
+            "num_valid_in_pool": int(np.sum(self.cand_valid[self.u] > 0.5)),
+        }
+
     def reset(
         self,
         *,
@@ -194,7 +223,8 @@ class MovieLensRecEnv(gym.Env):
             self.u = int(self.split_user_indices[choice_idx])
 
         self.t = 0
-        self.visited = np.zeros(self.num_candidates, dtype=np.float32)
+        # Padding slots of shorter sessions start unavailable
+        self.visited = (1.0 - self.cand_valid[self.u]).astype(np.float32)
         self.covered_genres = np.zeros(self.num_genres, dtype=np.float32)
         self.hits_so_far = 0
         self.consecutive_misses = 0
@@ -203,20 +233,10 @@ class MovieLensRecEnv(gym.Env):
         self.episode_return = 0.0
         self.history = []
 
-        # Initialize session_vec from user's static factor + initial session taste hint
-        pu_norm = self.user_factors_norm[self.u]
-        target_vec = self.u_target_vecs[self.u]
-        noise = self._rng.normal(0.0, 0.08, size=(self.latent_dim,)).astype(np.float32)
-        init_vec = 0.45 * pu_norm + 0.55 * target_vec + noise
-        self.session_vec = (init_vec / (np.linalg.norm(init_vec) + 1e-8)).astype(np.float32)
+        # The session starts at the user's static FunkSVD taste vector
+        self.session_vec = self.user_factors_norm[self.u].copy()
 
-        obs = self._get_obs()
-        info = {
-            "valid_mask": (1.0 - self.visited).astype(np.float32),
-            "user_idx": int(self.u),
-            "num_liked_in_pool": int(np.sum(self.cand_is_liked[self.u] == 1)),
-        }
-        return obs, info
+        return self._get_obs(), self._info()
 
     def step(
         self, action: int
@@ -230,23 +250,23 @@ class MovieLensRecEnv(gym.Env):
         u = self.u
         self.t += 1
 
+        is_valid_slot = bool(self.cand_valid[u, action_int] > 0.5)
         movie_id = int(self.cand_items[u, action_int])
         true_rating = float(self.cand_true_ratings[u, action_int])
         novelty_norm = float(self.cand_novelty[u, action_int])
         novelty_bits = float(self.cand_novelty_bits[u, action_int])
-        item_vec = self.cand_item_factors[u, action_int]
-        target_vec = self.u_target_vecs[u]
 
         if self.visited[action_int] >= 0.5:
-            # Repeated recommendation penalty
-            reward = -1.5
+            # Repeated recommendation or padding slot
+            reward = REPEAT_PENALTY
             is_hit = 0
             self.consecutive_misses += 1
         else:
             self.visited[action_int] = 1.0
             self.novelty_sum += novelty_norm
+            item_vec = self.cand_item_factors[u, action_int]
 
-            # Genre diversity coverage bonus
+            # Genre coverage of the recommended list (the bonus is paid on hits only)
             item_g = self.cand_genres[u, action_int]
             n_item_genres = float(np.sum(item_g > 0.0))
             new_g_count = float(np.sum((item_g > 0.0) & (self.covered_genres == 0.0)))
@@ -257,33 +277,32 @@ class MovieLensRecEnv(gym.Env):
                 is_hit = 1
                 self.hits_so_far += 1
                 self.consecutive_misses = 0
-                rel_reward = 1.0 + 0.25 * ((true_rating - 4.0) / 1.0)
-                # Update session_vec strongly toward liked item & session cluster
-                updated = 0.50 * self.session_vec + 0.30 * item_vec + 0.20 * target_vec
-                self.session_vec = (updated / (np.linalg.norm(updated) + 1e-8)).astype(
-                    np.float32
+                reward = float(
+                    1.0
+                    + 0.25 * (true_rating - LIKE_THRESHOLD)
+                    + NOVELTY_WEIGHT * novelty_norm
+                    + DIVERSITY_WEIGHT * new_genre_bonus
                 )
+                updated = 0.50 * self.session_vec + 0.30 * item_vec
             else:
                 is_hit = 0
                 self.consecutive_misses += 1
-                rel_reward = -0.4
-                # Update session_vec away from disliked item
-                updated = 0.75 * self.session_vec - 0.20 * item_vec + 0.15 * target_vec
-                self.session_vec = (updated / (np.linalg.norm(updated) + 1e-8)).astype(
-                    np.float32
-                )
-
-            reward = float(rel_reward + 0.20 * novelty_norm + 0.10 * new_genre_bonus)
+                reward = MISS_REWARD
+                updated = 0.75 * self.session_vec - 0.20 * item_vec
+            self.session_vec = (updated / (np.linalg.norm(updated) + 1e-8)).astype(np.float32)
 
         self.last_reward = float(reward)
         self.episode_return += float(reward)
 
-        terminated = bool(self.consecutive_misses >= 5)
+        terminated = bool(self.consecutive_misses >= ABANDON_AFTER_MISSES)
         truncated = bool(self.t >= self.horizon)
 
-        m_info = self.movie_lookup.get(
-            str(movie_id), {"title": f"Movie #{movie_id}", "genres": "Unknown"}
-        )
+        if is_valid_slot:
+            m_info = self.movie_lookup.get(
+                str(movie_id), {"title": f"Movie #{movie_id}", "genres": "Unknown"}
+            )
+        else:
+            m_info = {"title": "(padding slot)", "genres": "-"}
         self.history.append(
             {
                 "step": self.t,
@@ -300,12 +319,12 @@ class MovieLensRecEnv(gym.Env):
 
         obs = self._get_obs()
         info = {
-            "valid_mask": (1.0 - self.visited).astype(np.float32),
+            **self._info(),
             "is_hit": int(is_hit),
+            "is_valid_slot": int(is_valid_slot),
             "movie_id": int(movie_id),
             "novelty_bits": float(novelty_bits),
             "true_rating": float(true_rating),
-            "user_idx": int(u),
             "consecutive_misses": int(self.consecutive_misses),
             "hits_so_far": int(self.hits_so_far),
         }
@@ -334,12 +353,12 @@ def run_random_policy_diagnostics(
     num_episodes: int = 100,
     save_fig_path: str = "workshop3/report/figures/fig2_random_policy_diagnostics.png",
     save_json_path: str = "workshop3/report/random_diagnostics.json",
-    cache_path: str = "workshop3/data/processed_cache.npz",
+    cache_path: str = DEFAULT_CACHE_PATH,
     seed: int = 42,
 ) -> Dict[str, Any]:
     """
-    Execute a uniform random policy over `num_episodes` episodes to verify MDP
-    dynamics, state/reward bounds, termination behavior, and action coverage.
+    Execute a uniform random policy over all 50 slots for `num_episodes` episodes to verify
+    MDP dynamics, state/reward bounds, termination behavior, and action coverage.
     Saves Figure 2 (300 DPI) and summary metrics JSON.
     """
     env = MovieLensRecEnv(cache_path=cache_path, split="test", horizon=10, seed=seed)
@@ -352,6 +371,7 @@ def run_random_policy_diagnostics(
     early_terminations = 0
     action_counts = np.zeros(env.num_candidates, dtype=np.int32)
     repeat_actions = 0
+    invalid_actions = 0
     total_steps = 0
 
     for ep in range(num_episodes):
@@ -364,7 +384,9 @@ def run_random_policy_diagnostics(
 
         for _ in range(env.horizon):
             action = int(rng.integers(0, env.num_candidates))
-            if action in visited_set:
+            if env.cand_valid[env.u, action] < 0.5:
+                invalid_actions += 1
+            elif action in visited_set:
                 repeat_actions += 1
             visited_set.add(action)
             action_counts[action] += 1
@@ -404,18 +426,19 @@ def run_random_policy_diagnostics(
         "mean_hit_rate": round(float(np.mean(episode_hit_rates)), 4),
         "mean_novelty_bits": round(float(np.mean(episode_novelties)), 3),
         "repeat_action_rate": round(float(repeat_actions) / float(max(1, total_steps)), 4),
+        "invalid_slot_action_rate": round(float(invalid_actions) / float(max(1, total_steps)), 4),
         "total_steps_executed": int(total_steps),
         "unique_actions_sampled": int(np.sum(action_counts > 0)),
     }
 
     # Save JSON diagnostics
-    json_path = Path(save_json_path)
+    json_path = resolve_repo_path(save_json_path)
     json_path.parent.mkdir(parents=True, exist_ok=True)
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(diagnostics, f, indent=2)
 
     # Generate publication-quality 1x3 Figure 2
-    fig_path = Path(save_fig_path)
+    fig_path = resolve_repo_path(save_fig_path)
     fig_path.parent.mkdir(parents=True, exist_ok=True)
 
     plt.rcParams.update(
@@ -473,7 +496,7 @@ def run_random_policy_diagnostics(
         linewidth=1.6,
         label=f"Mean Length = {np.mean(lengths_arr):.2f} steps",
     )
-    ax1.set_xticks(range(5, env.horizon + 1))
+    ax1.set_xticks(range(ABANDON_AFTER_MISSES, env.horizon + 1))
     ax1.set_title("(b) Episode Length & Early Termination")
     ax1.set_xlabel("Episode Length (Steps)")
     ax1.set_ylabel("Number of Episodes")

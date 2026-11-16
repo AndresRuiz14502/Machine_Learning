@@ -2,11 +2,21 @@
 Data preparation pipeline for Workshop 3:
 Reinforcement Learning for Sequential Movie Recommendation on MovieLens 32M.
 
-Replicates the exact Workshop 1 sampling & temporal split protocol (seed=42),
-trains a fast vectorized FunkSVD model (k=20, lr=0.01, reg=0.02, 15 epochs)
-to extract static user/item latent factors and biases, and constructs the
-per-user candidate pools (M=50) and ground-truth/oracle evaluation splits
-for the Gymnasium sequential recommendation environment.
+Replicates the exact Workshop 1 sampling and global chronological split (seed=42,
+80/10/10 by timestamp), trains a vectorized FunkSVD model (k=20, lr=0.01, reg=0.02,
+15 epochs) on the training split only, and builds leak-free RL sessions from real
+feedback recorded after the training cut:
+
+- RL train/val sessions: clean ratings of warm users inside the validation period
+  (users split 80/20 at random between RL train and RL val).
+- RL test sessions: clean ratings of warm users inside the test period, i.e. the same
+  held-out future that Workshops 1 and 2 report on.
+
+A session's candidate slate holds its first 50 real ratings in chronological order
+(selection never looks at the ratings). Every observation feature (latent factors,
+biases, FunkSVD scores, popularity, novelty) is computed from the training split
+only; ratings and like labels are used exclusively by the environment to emit rewards
+and by the evaluation metrics.
 
 Raw CSVs (ratings.csv, movies.csv) are read from <repo>/dataSet/ when present,
 with workshop3/data/ml-32m/ml-32m/ as fallback; outputs go to workshop3/data/.
@@ -17,7 +27,6 @@ launched with any working directory.
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 from typing import Dict, Tuple
@@ -35,6 +44,11 @@ RAW_DATA_DIRS = (
     REPO_ROOT / "dataSet",
     W3_DATA_DIR / "ml-32m" / "ml-32m",
 )
+
+LIKE_THRESHOLD = 4.0
+NUM_CANDIDATE_SLOTS = 50
+MIN_SESSION_RATINGS = 20
+RL_VAL_USER_FRACTION = 0.2
 
 ALL_GENRES = [
     "Action",
@@ -277,24 +291,63 @@ def evaluate_rmse(
     return float(np.sqrt(np.mean((r_true - pred) ** 2)))
 
 
+def _minmax(values: np.ndarray) -> np.ndarray:
+    """Min-max normalize ``values`` into [0, 1] (constant arrays map to 0)."""
+    span = float(values.max() - values.min())
+    return ((values - values.min()) / (span + 1e-8)).astype(np.float32)
+
+
+def _iso(ts: int) -> str:
+    return pd.to_datetime(int(ts), unit="s").strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _period_sessions(
+    clean_df: pd.DataFrame,
+    max_candidates: int,
+    min_session_ratings: int,
+    like_threshold: float,
+) -> Dict[int, pd.DataFrame]:
+    """Chronological sessions of eligible warm users inside one period.
+
+    A user is eligible when the period holds at least ``min_session_ratings`` clean ratings and
+    the first ``max_candidates`` of them (the candidate slate) contain at least one like. Slate
+    membership depends only on timestamps, never on the ratings.
+    """
+    ordered = clean_df.sort_values(["u_idx", "timestamp"], kind="mergesort")
+    sessions: Dict[int, pd.DataFrame] = {}
+    for u, grp in ordered.groupby("u_idx", sort=True):
+        if len(grp) < min_session_ratings:
+            continue
+        slate = grp.iloc[:max_candidates]
+        if bool((slate["rating"].to_numpy() >= like_threshold).any()):
+            sessions[int(u)] = slate
+    return sessions
+
+
 def build_rl_candidate_pools(
     sub: pd.DataFrame,
     n_u: int,
     n_i: int,
     item_genres: np.ndarray,
-    n_train_users: int = 600,
-    n_val_users: int = 250,
-    n_test_users: int = 250,
-    num_candidates: int = 50,
+    max_candidates: int = NUM_CANDIDATE_SLOTS,
+    min_session_ratings: int = MIN_SESSION_RATINGS,
+    val_user_fraction: float = RL_VAL_USER_FRACTION,
+    like_threshold: float = LIKE_THRESHOLD,
     seed: int = 42,
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, object]]:
-    """
-    Construct the RL user splits (600 train, 250 val, 250 test) and M=50 candidate pools.
+    """Build leak-free RL sessions and candidate slates from real post-cut feedback.
 
-    Uses both the Workshop 1 global temporal split (80/10/10) for benchmark verification
-    and chronological per-user held-out windows (first 70% history for FunkSVD training,
-    final 30% future interactions for sequential RL episode evaluation) so there is zero
-    data leakage between static factor estimation and sequential episode rewards.
+    1. Global chronological split shared with Workshops 1-2 (80% train / 10% val / 10% test by
+       timestamp). FunkSVD (k=20) is trained on the train split only, so every latent factor,
+       bias, popularity count, and novelty value predates every RL session.
+    2. A session is the chronologically ordered list of a warm user's clean ratings (user and
+       movie both seen in train) inside one period; see ``_period_sessions``.
+    3. RL train/val sessions come from the validation period (eligible users split at random),
+       RL test sessions from the test period. A user may contribute an earlier session to RL
+       training and a later one to testing, mirroring the temporal protocol of Workshops 1-2.
+    4. The candidate slate holds the session's first ``max_candidates`` real ratings; shorter
+       sessions are padded with invalid slots (``cand_valid == 0``) that the environment masks.
+       Valid slots are ordered by the static FunkSVD score, which never looks at the ratings.
     """
     rng = np.random.default_rng(seed)
 
@@ -317,57 +370,12 @@ def build_rl_candidate_pools(
         global_test_df["u_idx"].isin(train_u_set) & global_test_df["i_idx"].isin(train_i_set)
     ]
 
-    # 2. Identify active users with rich chronological history and held-out window
-    # Sort within each user by timestamp
-    sub_user_sorted = sub.sort_values(["u_idx", "timestamp"], kind="mergesort").reset_index(drop=True)
-    user_rank = sub_user_sorted.groupby("u_idx").cumcount()
-    user_totals = sub_user_sorted["u_idx"].map(sub_user_sorted["u_idx"].value_counts())
-    is_heldout = user_rank >= (0.70 * user_totals)
-
-    hist_df = sub_user_sorted[~is_heldout]
-    heldout_df = sub_user_sorted[is_heldout]
-
-    # Count liked (>=4.0) and disliked (<4.0) in held-out window per user
-    held_likes = heldout_df[heldout_df["rating"] >= 4.0].groupby("u_idx").size()
-    held_dislikes = heldout_df[heldout_df["rating"] < 4.0].groupby("u_idx").size()
-    hist_counts_global = global_train_df.groupby("u_idx").size()
-
-    qualifying_users = []
-    for u in range(n_u):
-        n_hist_g = int(hist_counts_global.get(u, 0))
-        n_lk = int(held_likes.get(u, 0))
-        n_dlk = int(held_dislikes.get(u, 0))
-        if n_hist_g >= 20 and n_lk >= 10 and n_dlk >= 6:
-            qualifying_users.append(u)
-    qualifying_users = np.array(qualifying_users, dtype=np.int32)
-    print(f"[data_prep] Qualifying active users for RL pool: {len(qualifying_users):,}")
-
-    # Prioritize users active in the most recent temporal windows for test and val splits
-    user_max_ts = sub.groupby("u_idx")["timestamp"].max().loc[qualifying_users].to_numpy()
-    order_by_recency = np.argsort(-user_max_ts)  # most recent first
-    ordered_qual = qualifying_users[order_by_recency]
-
-    n_pool = n_train_users + n_val_users + n_test_users
-    selected_test = ordered_qual[:n_test_users]
-    selected_val = ordered_qual[n_test_users : n_test_users + n_val_users]
-    remaining_qual = ordered_qual[n_test_users + n_val_users :]
-    rng.shuffle(remaining_qual)
-    selected_train = remaining_qual[:n_train_users]
-
-    pool_users = np.concatenate([selected_train, selected_val, selected_test]).astype(np.int32)
-    train_user_indices = np.arange(0, n_train_users, dtype=np.int32)
-    val_user_indices = np.arange(n_train_users, n_train_users + n_val_users, dtype=np.int32)
-    test_user_indices = np.arange(n_train_users + n_val_users, n_pool, dtype=np.int32)
-
-    # 3. Train FunkSVD on the exact 80% global_train_df (1,895,184 ratings)
-    pool_user_set = set(pool_users.tolist())
-    svd_train_df = global_train_df
-
-    print(f"[data_prep] Training FunkSVD on {len(svd_train_df):,} train interactions ...")
+    # 2. FunkSVD on exactly the 80% global train split (the Workshop 1/2 training data)
+    print(f"[data_prep] Training FunkSVD on {len(global_train_df):,} train interactions ...")
     global_mean, user_biases_all, item_biases_all, user_factors_all, item_factors_all = train_funk_svd(
-        u_train=svd_train_df["u_idx"].to_numpy(),
-        i_train=svd_train_df["i_idx"].to_numpy(),
-        r_train=svd_train_df["rating"].to_numpy(),
+        u_train=global_train_df["u_idx"].to_numpy(),
+        i_train=global_train_df["i_idx"].to_numpy(),
+        r_train=global_train_df["rating"].to_numpy(),
         n_u=n_u,
         n_i=n_i,
         k=20,
@@ -377,304 +385,137 @@ def build_rl_candidate_pools(
         batch_size=1024,
         seed=seed,
     )
-
+    factor_args = (global_mean, user_biases_all, item_biases_all, user_factors_all, item_factors_all)
     train_rmse = evaluate_rmse(
-        svd_train_df["u_idx"].to_numpy(),
-        svd_train_df["i_idx"].to_numpy(),
-        svd_train_df["rating"].to_numpy(),
-        global_mean,
-        user_biases_all,
-        item_biases_all,
-        user_factors_all,
-        item_factors_all,
+        global_train_df["u_idx"].to_numpy(),
+        global_train_df["i_idx"].to_numpy(),
+        global_train_df["rating"].to_numpy(),
+        *factor_args,
     )
     val_rmse = evaluate_rmse(
         clean_val_df["u_idx"].to_numpy(),
         clean_val_df["i_idx"].to_numpy(),
         clean_val_df["rating"].to_numpy(),
-        global_mean,
-        user_biases_all,
-        item_biases_all,
-        user_factors_all,
-        item_factors_all,
+        *factor_args,
     )
     test_rmse = evaluate_rmse(
         clean_test_df["u_idx"].to_numpy(),
         clean_test_df["i_idx"].to_numpy(),
         clean_test_df["rating"].to_numpy(),
-        global_mean,
-        user_biases_all,
-        item_biases_all,
-        user_factors_all,
-        item_factors_all,
+        *factor_args,
     )
     print(
         f"[data_prep] FunkSVD RMSE -> Train: {train_rmse:.4f}, "
         f"Clean Val: {val_rmse:.4f}, Clean Test: {test_rmse:.4f}"
     )
 
-    # 4. Compute item popularity and self-information novelty in bits on historical train
-    item_pop_counts = np.bincount(svd_train_df["i_idx"].to_numpy(), minlength=n_i).astype(np.float32)
-    item_pop_probs = np.clip(item_pop_counts / float(len(svd_train_df)), 1e-7, 1.0)
+    # 3. Item popularity and self-information novelty (bits), from the train split only
+    item_pop_counts = np.bincount(global_train_df["i_idx"].to_numpy(), minlength=n_i).astype(np.float32)
+    item_pop_probs = np.clip(item_pop_counts / float(len(global_train_df)), 1e-7, 1.0)
     item_novelty_bits = (-np.log2(item_pop_probs)).astype(np.float32)
-    item_novelty_norm = (
-        (item_novelty_bits - item_novelty_bits.min())
-        / (item_novelty_bits.max() - item_novelty_bits.min() + 1e-8)
-    ).astype(np.float32)
+    item_novelty_norm = _minmax(item_novelty_bits)
+    item_pop_norm = _minmax(np.log1p(item_pop_counts))
 
-    pop_log = np.log1p(item_pop_counts)
-    item_pop_norm = ((pop_log - pop_log.min()) / (pop_log.max() - pop_log.min() + 1e-8)).astype(
-        np.float32
-    )
-
-    # Normalize raw item factors for cosine operations
     item_norms = np.linalg.norm(item_factors_all, axis=1, keepdims=True) + 1e-8
     item_factors_unit = (item_factors_all / item_norms).astype(np.float32)
 
-    # Pre-group historical and held-out interactions for pool users
-    hist_pool = hist_df[hist_df["u_idx"].isin(pool_user_set)]
-    held_pool = heldout_df[heldout_df["u_idx"].isin(pool_user_set)]
+    # 4. Real sessions: RL train/val from the validation period, RL test from the test period
+    val_sessions = _period_sessions(clean_val_df, max_candidates, min_session_ratings, like_threshold)
+    test_sessions = _period_sessions(clean_test_df, max_candidates, min_session_ratings, like_threshold)
 
-    hist_by_u = {
-        int(u): grp["i_idx"].to_numpy() for u, grp in hist_pool.groupby("u_idx", sort=False)
-    }
-    held_by_u = {
-        int(u): (grp["i_idx"].to_numpy(), grp["rating"].to_numpy())
-        for u, grp in held_pool.groupby("u_idx", sort=False)
-    }
+    val_period_users = np.array(sorted(val_sessions), dtype=np.int32)
+    shuffled = val_period_users[rng.permutation(len(val_period_users))]
+    n_rl_val = int(round(val_user_fraction * len(shuffled)))
+    rl_val_users = np.sort(shuffled[:n_rl_val])
+    rl_train_users = np.sort(shuffled[n_rl_val:])
+    rl_test_users = np.array(sorted(test_sessions), dtype=np.int32)
 
-    # Top popular items pool and high-novelty items pool
-    top_pop_items = np.argsort(-item_pop_counts).astype(np.int32)
-    niche_candidates = np.where((item_pop_counts >= 8) & (item_novelty_norm >= 0.35))[0].astype(
-        np.int32
+    pool_rows = (
+        [(int(u), val_sessions[int(u)], 0) for u in rl_train_users]
+        + [(int(u), val_sessions[int(u)], 0) for u in rl_val_users]
+        + [(int(u), test_sessions[int(u)], 1) for u in rl_test_users]
+    )
+    n_pool = len(pool_rows)
+    n_train_users, n_val_users, n_test_users = len(rl_train_users), len(rl_val_users), len(rl_test_users)
+    print(
+        f"[data_prep] Eligible sessions: {len(val_period_users)} validation-period users "
+        f"({n_train_users} RL train / {n_val_users} RL val), {n_test_users} test-period users"
     )
 
-    # Allocate output arrays for N_pool = 1100
-    k = 20
+    user_ids_of = sub.groupby("u_idx")["userId"].first().reindex(range(n_u)).to_numpy(np.int64)
+    movie_ids_of = sub.groupby("i_idx")["movieId"].first().reindex(range(n_i)).to_numpy(np.int64)
+
+    k = int(user_factors_all.shape[1])
+    m = int(max_candidates)
+    n_genres = int(item_genres.shape[1])
+    pool_users = np.zeros(n_pool, dtype=np.int32)
+    pool_period = np.zeros(n_pool, dtype=np.int8)
     user_factors_pool = np.zeros((n_pool, k), dtype=np.float32)
-    user_biases_pool = np.zeros((n_pool,), dtype=np.float32)
-    cand_items = np.zeros((n_pool, num_candidates), dtype=np.int32)
-    cand_item_factors = np.zeros((n_pool, num_candidates, k), dtype=np.float32)
-    cand_true_ratings = np.zeros((n_pool, num_candidates), dtype=np.float32)
-    cand_is_liked = np.zeros((n_pool, num_candidates), dtype=np.int8)
-    cand_svd_scores = np.zeros((n_pool, num_candidates), dtype=np.float32)
-    cand_bias_scores = np.zeros((n_pool, num_candidates), dtype=np.float32)
-    cand_pop_scores = np.zeros((n_pool, num_candidates), dtype=np.float32)
-    cand_novelty = np.zeros((n_pool, num_candidates), dtype=np.float32)
-    cand_novelty_bits = np.zeros((n_pool, num_candidates), dtype=np.float32)
-    cand_genres = np.zeros((n_pool, num_candidates, item_genres.shape[1]), dtype=np.float32)
+    user_biases_pool = np.zeros(n_pool, dtype=np.float32)
+    cand_items = np.full((n_pool, m), -1, dtype=np.int32)
+    cand_movie_ids = np.full((n_pool, m), -1, dtype=np.int64)
+    cand_valid = np.zeros((n_pool, m), dtype=np.int8)
+    cand_timestamps = np.zeros((n_pool, m), dtype=np.int64)
+    cand_true_ratings = np.zeros((n_pool, m), dtype=np.float32)
+    cand_is_liked = np.zeros((n_pool, m), dtype=np.int8)
+    cand_item_factors = np.zeros((n_pool, m, k), dtype=np.float32)
+    cand_svd_pred = np.zeros((n_pool, m), dtype=np.float32)
+    cand_svd_scores = np.zeros((n_pool, m), dtype=np.float32)
+    cand_bias_scores = np.zeros((n_pool, m), dtype=np.float32)
+    cand_pop_scores = np.zeros((n_pool, m), dtype=np.float32)
+    cand_novelty = np.zeros((n_pool, m), dtype=np.float32)
+    cand_novelty_bits = np.zeros((n_pool, m), dtype=np.float32)
+    cand_genres = np.zeros((n_pool, m, n_genres), dtype=np.float32)
 
-    print(f"[data_prep] Constructing M={num_candidates} candidate pools for {n_pool} users ...")
-    for pool_idx, u in enumerate(pool_users):
-        u_int = int(u)
-        pu = user_factors_all[u_int]
-        bu = user_biases_all[u_int]
-        user_factors_pool[pool_idx] = pu
-        user_biases_pool[pool_idx] = bu
+    for row, (u, session, period) in enumerate(pool_rows):
+        items = session["i_idx"].to_numpy(np.int32)
+        ratings = session["rating"].to_numpy(np.float32)
+        stamps = session["timestamp"].to_numpy(np.int64)
+        pu, bu = user_factors_all[u], float(user_biases_all[u])
+        svd_raw = (global_mean + bu + item_biases_all[items] + item_factors_all[items] @ pu).astype(np.float32)
 
-        seen_hist = set(hist_by_u.get(u_int, np.empty(0, dtype=np.int32)).tolist())
-        h_items, h_ratings = held_by_u[u_int]
+        # Slot order: static FunkSVD score (descending); ties keep chronological order
+        order = np.argsort(-svd_raw, kind="mergesort")
+        items, ratings, stamps, svd_raw = items[order], ratings[order], stamps[order], svd_raw[order]
+        n = len(items)
 
-        # All predicted static SVD scores for this user
-        all_svd = global_mean + bu + item_biases_all + (item_factors_all @ pu)
-        all_bias = global_mean + bu + item_biases_all
+        pool_users[row] = u
+        pool_period[row] = period
+        user_factors_pool[row] = pu
+        user_biases_pool[row] = bu
+        cand_items[row, :n] = items
+        cand_movie_ids[row, :n] = movie_ids_of[items]
+        cand_valid[row, :n] = 1
+        cand_timestamps[row, :n] = stamps
+        cand_true_ratings[row, :n] = ratings
+        cand_is_liked[row, :n] = np.where(ratings >= like_threshold, 1, -1).astype(np.int8)
+        cand_item_factors[row, :n] = item_factors_unit[items]
+        cand_svd_pred[row, :n] = svd_raw
+        cand_svd_scores[row, :n] = _minmax(svd_raw)
+        cand_bias_scores[row, :n] = _minmax((global_mean + bu + item_biases_all[items]).astype(np.float32))
+        cand_pop_scores[row, :n] = _minmax(item_pop_norm[items])
+        cand_novelty[row, :n] = item_novelty_norm[items]
+        cand_novelty_bits[row, :n] = item_novelty_bits[items]
+        cand_genres[row, :n] = item_genres[items]
 
-        liked_mask = h_ratings >= 4.0
-        disliked_mask = h_ratings < 4.0
-
-        liked_items_all = h_items[liked_mask]
-        liked_ratings_all = h_ratings[liked_mask]
-        disliked_items_all = h_items[disliked_mask]
-        disliked_ratings_all = h_ratings[disliked_mask]
-
-        # Compute user's true held-out session taste vector u_future_vec
-        u_future_raw = np.mean(item_factors_unit[liked_items_all], axis=0)
-        u_future_vec = (u_future_raw / (np.linalg.norm(u_future_raw) + 1e-8)).astype(np.float32)
-
-        # Select up to 14 observed liked items:
-        # Mix 3 high-SVD liked items and up to 11 higher-novelty / moderate-SVD liked items
-        liked_svd = all_svd[liked_items_all]
-        liked_nov = item_novelty_norm[liked_items_all]
-        if len(liked_items_all) > 14:
-            top_svd_order = np.argsort(-liked_svd)
-            chosen_high = top_svd_order[:3]
-            rem_order = top_svd_order[3:]
-            # Prefer high novelty + future taste alignment among remaining liked items
-            rem_scores = 0.6 * liked_nov[rem_order] + 0.4 * (
-                item_factors_unit[liked_items_all[rem_order]] @ u_future_vec
-            )
-            chosen_rem = rem_order[np.argsort(-rem_scores)[:11]]
-            chosen_lk_idx = np.concatenate([chosen_high, chosen_rem])
-        else:
-            chosen_lk_idx = np.arange(len(liked_items_all))
-
-        sel_liked_items = liked_items_all[chosen_lk_idx]
-        sel_liked_ratings = liked_ratings_all[chosen_lk_idx]
-
-        # Select up to 12 observed disliked items, prioritizing those with highest static SVD score
-        # (reflecting static model false positives / temporal taste drift)
-        disliked_svd = all_svd[disliked_items_all]
-        if len(disliked_items_all) > 12:
-            chosen_dlk_idx = np.argsort(-disliked_svd)[:12]
-        else:
-            chosen_dlk_idx = np.arange(len(disliked_items_all))
-
-        sel_disliked_items = disliked_items_all[chosen_dlk_idx]
-        sel_disliked_ratings = disliked_ratings_all[chosen_dlk_idx]
-
-        chosen_set = set(sel_liked_items.tolist()) | set(sel_disliked_items.tolist())
-        forbid_set = seen_hist | set(h_items.tolist())
-
-        # Fill remaining slots (up to 50) with:
-        # (a) 8 top static SVD unobserved items that have low alignment with u_future_vec
-        # (b) 8 top popular unobserved items
-        # (c) remaining (~8) high-novelty niche items that strongly align with u_future_vec
-        n_needed = num_candidates - len(chosen_set)
-        n_svd_fill = min(8, n_needed)
-        n_pop_fill = min(8, max(0, n_needed - n_svd_fill))
-        n_niche_fill = max(0, n_needed - n_svd_fill - n_pop_fill)
-
-        # (a) High static SVD decoys (high old SVD score, low current session alignment)
-        svd_decoy_score = all_svd - 0.8 * (item_factors_unit @ u_future_vec)
-        top_svd_cands = np.argsort(-svd_decoy_score)
-        svd_fill = []
-        for idx_m in top_svd_cands:
-            m_int = int(idx_m)
-            if m_int not in forbid_set and m_int not in chosen_set:
-                svd_fill.append(m_int)
-                chosen_set.add(m_int)
-                if len(svd_fill) >= n_svd_fill:
-                    break
-
-        # (b) High popularity unobserved items
-        pop_fill = []
-        for idx_m in top_pop_items:
-            m_int = int(idx_m)
-            if m_int not in forbid_set and m_int not in chosen_set:
-                pop_fill.append(m_int)
-                chosen_set.add(m_int)
-                if len(pop_fill) >= n_pop_fill:
-                    break
-
-        # (c) High-novelty niche items aligned with u_future_vec
-        n_niche_fill = num_candidates - len(chosen_set)
-        niche_aff = (item_factors_unit[niche_candidates] @ u_future_vec) + 0.35 * item_novelty_norm[
-            niche_candidates
-        ]
-        niche_order = niche_candidates[np.argsort(-niche_aff)]
-        niche_fill = []
-        for idx_m in niche_order:
-            m_int = int(idx_m)
-            if m_int not in forbid_set and m_int not in chosen_set:
-                niche_fill.append(m_int)
-                chosen_set.add(m_int)
-                if len(niche_fill) >= n_niche_fill:
-                    break
-
-        # Fallback if a power user has rated almost every movie in niche_candidates
-        if len(chosen_set) < num_candidates:
-            for idx_m in top_svd_cands:
-                m_int = int(idx_m)
-                if m_int not in chosen_set:
-                    niche_fill.append(m_int)
-                    chosen_set.add(m_int)
-                    if len(chosen_set) >= num_candidates:
-                        break
-
-        # Assemble all 50 candidate items and their labels
-        c_items = np.concatenate(
-            [
-                sel_liked_items,
-                sel_disliked_items,
-                np.array(svd_fill, dtype=np.int32),
-                np.array(pop_fill, dtype=np.int32),
-                np.array(niche_fill, dtype=np.int32),
-            ]
-        )
-        c_ratings = np.zeros(num_candidates, dtype=np.float32)
-        c_liked = np.zeros(num_candidates, dtype=np.int8)
-
-        n_lk = len(sel_liked_items)
-        n_dlk = len(sel_disliked_items)
-        c_ratings[:n_lk] = sel_liked_ratings
-        c_liked[:n_lk] = 1
-
-        c_ratings[n_lk : n_lk + n_dlk] = sel_disliked_ratings
-        c_liked[n_lk : n_lk + n_dlk] = -1
-
-        # Latent preference oracle for unobserved items:
-        # Top 4 niche items aligned with u_future_vec are marked as latent session hits (1)
-        unobs_start = n_lk + n_dlk
-        unobs_items = c_items[unobs_start:]
-        unobs_aff = item_factors_unit[unobs_items] @ u_future_vec
-        # Niche items at the end that strongly match u_future_vec become oracle hits
-        oracle_thresh = np.percentile(unobs_aff, 80.0)
-        for rel_i, m_int in enumerate(unobs_items):
-            abs_i = unobs_start + rel_i
-            aff = float(unobs_aff[rel_i])
-            if aff >= oracle_thresh and rel_i >= (len(svd_fill) + len(pop_fill) - 1):
-                c_liked[abs_i] = 1
-                c_ratings[abs_i] = float(np.clip(4.1 + 0.7 * aff, 4.0, 5.0))
-            else:
-                c_liked[abs_i] = 0
-                c_ratings[abs_i] = float(np.clip(2.6 + 0.6 * aff, 1.0, 3.5))
-
-        # Raw static scores for these 50 candidates
-        raw_svd_50 = all_svd[c_items].astype(np.float32)
-        raw_bias_50 = all_bias[c_items].astype(np.float32)
-        raw_pop_50 = item_pop_norm[c_items].astype(np.float32)
-
-        # Sort the 50 candidate slots consistently by static cand_svd_scores descending
-        slot_order = np.argsort(-raw_svd_50)
-        c_items = c_items[slot_order]
-        c_ratings = c_ratings[slot_order]
-        c_liked = c_liked[slot_order]
-        raw_svd_50 = raw_svd_50[slot_order]
-        raw_bias_50 = raw_bias_50[slot_order]
-        raw_pop_50 = raw_pop_50[slot_order]
-
-        # Normalize static scores per user into [0, 1]
-        svd_norm = (raw_svd_50 - raw_svd_50.min()) / (raw_svd_50.max() - raw_svd_50.min() + 1e-8)
-        bias_norm = (raw_bias_50 - raw_bias_50.min()) / (
-            raw_bias_50.max() - raw_bias_50.min() + 1e-8
-        )
-        pop_norm = (raw_pop_50 - raw_pop_50.min()) / (raw_pop_50.max() - raw_pop_50.min() + 1e-8)
-
-        # Construct L2-normalized cand_item_factors (50, 20) that encode both the item's
-        # static SVD factor and its true held-out session taste alignment (u_future_vec)
-        base_q = item_factors_unit[c_items]  # (50, 20)
-        c_factors = np.zeros((num_candidates, k), dtype=np.float32)
-        for s_idx in range(num_candidates):
-            noise = rng.normal(0.0, 0.06, size=(k,)).astype(np.float32)
-            if c_liked[s_idx] == 1:
-                vec = 0.42 * base_q[s_idx] + 0.58 * u_future_vec + noise
-            else:
-                vec = 0.65 * base_q[s_idx] - 0.35 * u_future_vec + noise
-            c_factors[s_idx] = vec / (np.linalg.norm(vec) + 1e-8)
-
-        cand_items[pool_idx] = c_items
-        cand_item_factors[pool_idx] = c_factors
-        cand_true_ratings[pool_idx] = c_ratings
-        cand_is_liked[pool_idx] = c_liked
-        cand_svd_scores[pool_idx] = svd_norm.astype(np.float32)
-        cand_bias_scores[pool_idx] = bias_norm.astype(np.float32)
-        cand_pop_scores[pool_idx] = pop_norm.astype(np.float32)
-        cand_novelty[pool_idx] = item_novelty_norm[c_items]
-        cand_novelty_bits[pool_idx] = item_novelty_bits[c_items]
-        cand_genres[pool_idx] = item_genres[c_items]
-
-    # Compute summary diagnostics for dataset_stats.json
-    top10_svd_hits = float(np.mean(cand_is_liked[:, :10] == 1))
-    mean_liked_per_user = float(np.mean(np.sum(cand_is_liked == 1, axis=1)))
-    unique_cand_movies = int(len(np.unique(cand_items)))
+    train_user_indices = np.arange(0, n_train_users, dtype=np.int32)
+    val_user_indices = np.arange(n_train_users, n_train_users + n_val_users, dtype=np.int32)
+    test_user_indices = np.arange(n_train_users + n_val_users, n_pool, dtype=np.int32)
 
     arrays = {
+        "pool_users": pool_users,
+        "pool_user_ids": user_ids_of[pool_users],
+        "pool_period": pool_period,
         "user_factors": user_factors_pool,
         "user_biases": user_biases_pool,
         "cand_items": cand_items,
+        "cand_movie_ids": cand_movie_ids,
+        "cand_valid": cand_valid,
+        "cand_timestamps": cand_timestamps,
         "cand_item_factors": cand_item_factors,
         "cand_true_ratings": cand_true_ratings,
         "cand_is_liked": cand_is_liked,
+        "cand_svd_pred": cand_svd_pred,
         "cand_svd_scores": cand_svd_scores,
         "cand_bias_scores": cand_bias_scores,
         "cand_pop_scores": cand_pop_scores,
@@ -684,7 +525,25 @@ def build_rl_candidate_pools(
         "train_user_indices": train_user_indices,
         "val_user_indices": val_user_indices,
         "test_user_indices": test_user_indices,
+        # Train-split FunkSVD parameters, stored so tests can recompute every observation feature
+        "item_factors": item_factors_all.astype(np.float32),
+        "item_biases": item_biases_all.astype(np.float32),
+        "global_mean": np.array(global_mean, dtype=np.float64),
+        "train_end_timestamp": np.array(int(global_train_df["timestamp"].iloc[-1]), dtype=np.int64),
+        "val_end_timestamp": np.array(int(global_val_df["timestamp"].iloc[-1]), dtype=np.int64),
     }
+
+    valid = cand_valid.astype(bool)
+    test_rows = test_user_indices
+    valid_counts = valid.sum(axis=1)
+    liked_counts = (cand_is_liked == 1).sum(axis=1)
+    top10_hits = [
+        float(np.mean(cand_is_liked[r, : min(10, int(valid_counts[r]))] == 1)) for r in test_rows
+    ]
+
+    def _like_ratio(rows: np.ndarray) -> float:
+        mask = valid[rows]
+        return round(float(np.mean(cand_true_ratings[rows][mask] >= like_threshold)), 4)
 
     extra_stats = {
         "train_ratings_global": int(len(global_train_df)),
@@ -692,7 +551,10 @@ def build_rl_candidate_pools(
         "test_ratings_global": int(len(global_test_df)),
         "clean_val_ratings": int(len(clean_val_df)),
         "clean_test_ratings": int(len(clean_test_df)),
-        "funksvd_k": 20,
+        "train_end_utc": _iso(int(global_train_df["timestamp"].iloc[-1])),
+        "val_end_utc": _iso(int(global_val_df["timestamp"].iloc[-1])),
+        "test_end_utc": _iso(int(global_test_df["timestamp"].iloc[-1])),
+        "funksvd_k": k,
         "funksvd_lr": 0.01,
         "funksvd_reg": 0.02,
         "funksvd_epochs": 15,
@@ -700,15 +562,30 @@ def build_rl_candidate_pools(
         "funksvd_train_rmse": round(train_rmse, 4),
         "funksvd_val_rmse": round(val_rmse, 4),
         "funksvd_test_rmse": round(test_rmse, 4),
+        "session_rule": (
+            "first 50 clean ratings (warm user and movie) of a user inside one period, in "
+            f"chronological order; eligible if the period holds >= {min_session_ratings} clean "
+            "ratings and the slate contains >= 1 like (rating >= 4.0)"
+        ),
+        "min_session_ratings": int(min_session_ratings),
+        "num_candidate_slots": int(m),
+        "eligible_validation_period_users": int(len(val_period_users)),
+        "eligible_test_period_users": int(n_test_users),
         "rl_pool_users": int(n_pool),
         "rl_train_users": int(n_train_users),
         "rl_val_users": int(n_val_users),
         "rl_test_users": int(n_test_users),
-        "num_candidates_per_user": int(num_candidates),
-        "mean_liked_candidates_per_user": round(mean_liked_per_user, 2),
-        "static_top10_svd_hit_rate": round(top10_svd_hits, 4),
-        "mean_candidate_novelty_bits": round(float(np.mean(cand_novelty_bits)), 3),
-        "unique_movies_in_candidate_pools": unique_cand_movies,
+        "rl_train_test_user_overlap": int(len(set(rl_train_users.tolist()) & set(rl_test_users.tolist()))),
+        "mean_valid_slots_train": round(float(valid_counts[train_user_indices].mean()), 2),
+        "mean_valid_slots_test": round(float(valid_counts[test_rows].mean()), 2),
+        "mean_liked_slots_train": round(float(liked_counts[train_user_indices].mean()), 2),
+        "mean_liked_slots_test": round(float(liked_counts[test_rows].mean()), 2),
+        "like_ratio_train_sessions": _like_ratio(train_user_indices),
+        "like_ratio_val_sessions": _like_ratio(val_user_indices),
+        "like_ratio_test_sessions": _like_ratio(test_rows),
+        "static_top10_svd_precision_test": round(float(np.mean(top10_hits)), 4),
+        "mean_candidate_novelty_bits": round(float(np.mean(cand_novelty_bits[valid])), 3),
+        "unique_movies_in_candidate_pools": int(len(np.unique(cand_items[valid]))),
     }
     return arrays, extra_stats
 
@@ -732,10 +609,6 @@ def main() -> None:
         n_u=n_u,
         n_i=n_i,
         item_genres=item_genres,
-        n_train_users=600,
-        n_val_users=250,
-        n_test_users=250,
-        num_candidates=50,
         seed=42,
     )
 
@@ -746,9 +619,9 @@ def main() -> None:
     np.savez_compressed(cache_path, **arrays)
     print(f"[data_prep] Saved compressed cache to {cache_path}")
 
-    # Save subset of movie_lookup used in cand_items (plus all filtered movies for completeness)
-    used_movies = np.unique(arrays["cand_items"])
-    compact_lookup = {str(int(m)): movie_lookup[str(int(m))] for m in used_movies if str(int(m)) in movie_lookup}
+    # Movie metadata for every candidate movie (titles and genres for trajectory rendering)
+    used_movies = np.unique(arrays["cand_items"][arrays["cand_valid"].astype(bool)])
+    compact_lookup = {str(int(i)): movie_lookup[str(int(i))] for i in used_movies if str(int(i)) in movie_lookup}
     lookup_path = out_dir / "movie_lookup.json"
     with open(lookup_path, "w", encoding="utf-8") as f:
         json.dump(compact_lookup, f, indent=2, ensure_ascii=False)
