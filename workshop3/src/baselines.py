@@ -1,9 +1,13 @@
-"""Non-RL, Supervised Matrix Factorization, and Contextual Bandit Baselines for Workshop 3."""
+"""Non-RL and supervised baselines for Workshop 3, plus the shared policy evaluation loop.
+
+The myopic baseline is not defined here: it is the gamma = 0 DQN trained by `train.py`
+(`workshop3/checkpoints/bandit_gamma0.pt`), evaluated as a greedy `DQNAgent`.
+"""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import numpy as np
 
@@ -221,36 +225,38 @@ class GreedyFunkSVDPolicy(BasePolicy):
         return np.where(mask > 0.5, svd_scores, -1e9).astype(np.float32)
 
 
-class MyopicBanditPolicy(BasePolicy):
-    """Contextual Bandit (`gamma = 0`) baseline combining linear context features with UCB/epsilon.
+class GreedyHybridNeuMFPolicy(BasePolicy):
+    """Workshop 2 HybridNeuMF baseline acting greedily on static predicted ratings.
 
-    Combines static SVD preference (`0.65 * state[50:100]`), dynamic session similarity
-    (`0.25 * state[0:50]`), and novelty (`0.10 * state[100:150]`) with a UCB exploration
-    bonus and optional epsilon-greedy exploration, without multi-step Bellman propagation.
+    `candidate_scores[u, a]` is the Workshop 2 HybridNeuMF predicted rating of candidate slot `a`
+    for pool user `u` (`workshop3/data/w2_candidate_scores.npz`, built by `w2_scores.py`). Like
+    `GreedyFunkSVDPolicy`, it selects the valid action with the highest static score, without
+    sequential session adaptation or long-horizon RL value propagation. The pool user is read
+    from `info['user_idx']`, which the environment returns on every `reset` and `step`.
+
+    `slot_valid[u, a]` (the artifact's `cand_valid`) marks real slots. Padding slots are never
+    selected, even when every real slot of the session has already been recommended: the
+    policy then repeats a real slot instead.
     """
 
-    name: str = "MyopicBandit"
+    name: str = "GreedyHybridNeuMF"
 
-    def __init__(
-        self,
-        epsilon: float = 0.05,
-        ucb_c: float = 0.08,
-        seed: int = 42,
-        cache_data: Optional[dict[str, Any]] = None,
-    ) -> None:
-        self.epsilon = float(epsilon)
-        self.ucb_c = float(ucb_c)
-        self.seed = int(seed)
-        self.rng = np.random.default_rng(self.seed)
-        self.cache_data = cache_data
-
-        self.action_counts = np.zeros(self.action_dim, dtype=np.float64)
-        self.action_value_Bonus = np.zeros(self.action_dim, dtype=np.float64)
-        self.total_steps = 0
-
-    def reset(self) -> None:
-        """Keep cumulative bandit slot counts across episodes or reset per-session state."""
-        pass
+    def __init__(self, candidate_scores: np.ndarray, slot_valid: Optional[np.ndarray] = None) -> None:
+        scores = np.asarray(candidate_scores, dtype=np.float32)
+        if scores.ndim != 2 or scores.shape[1] != self.action_dim:
+            raise ValueError(
+                f"candidate_scores must have shape (n_pool_users, {self.action_dim}), got {scores.shape}"
+            )
+        if not np.all(np.isfinite(scores)):
+            raise ValueError("candidate_scores contains non-finite values")
+        if slot_valid is None:
+            valid = np.ones(scores.shape, dtype=bool)
+        else:
+            valid = np.asarray(slot_valid) > 0.5
+            if valid.shape != scores.shape:
+                raise ValueError(f"slot_valid shape {valid.shape} != candidate_scores shape {scores.shape}")
+        self.candidate_scores = scores
+        self.slot_valid = valid
 
     def score_actions(
         self,
@@ -259,39 +265,17 @@ class MyopicBanditPolicy(BasePolicy):
         info: Optional[dict[str, Any]] = None,
     ) -> np.ndarray:
         mask = self.extract_valid_mask(state, valid_mask=valid_mask, info=info)
-        state_arr = np.asarray(state, dtype=np.float32).reshape(-1)
-
-        dynamic_sim = state_arr[0:50]
-        svd_scores = state_arr[50:100]
-        novelty = state_arr[100:150]
-
-        linear_utility = 0.65 * svd_scores + 0.25 * dynamic_sim + 0.10 * novelty
-        ucb_bonus = self.ucb_c * np.sqrt(
-            np.log(float(self.total_steps) + 2.0) / (self.action_counts + 1.0)
-        ).astype(np.float32)
-
-        scores = linear_utility + ucb_bonus
-        return np.where(mask > 0.5, scores, -1e9).astype(np.float32)
-
-    def select_action(
-        self,
-        state: np.ndarray,
-        info: Optional[dict[str, Any]] = None,
-        valid_mask: Optional[np.ndarray] = None,
-        eval_mode: bool = False,
-    ) -> int:
-        mask = self.extract_valid_mask(state, valid_mask=valid_mask, info=info)
-        valid_indices = np.flatnonzero(mask > 0.5)
-
-        if (not eval_mode) and (self.rng.random() < self.epsilon):
-            action = int(self.rng.choice(valid_indices))
-        else:
-            scores = self.score_actions(state, valid_mask=mask, info=info)
-            action = int(np.argmax(scores))
-
-        self.action_counts[action] += 1.0
-        self.total_steps += 1
-        return action
+        if not isinstance(info, dict) or info.get("user_idx") is None:
+            raise ValueError("GreedyHybridNeuMFPolicy needs info['user_idx'] to look up W2 scores")
+        u_idx = int(info["user_idx"])
+        if not 0 <= u_idx < len(self.candidate_scores):
+            raise IndexError(f"user_idx {u_idx} outside [0, {len(self.candidate_scores) - 1}]")
+        real_slots = self.slot_valid[u_idx]
+        allowed = (mask > 0.5) & real_slots
+        if not np.any(allowed):
+            # Every real slot was already recommended: repeat one rather than pick a padding slot
+            allowed = real_slots
+        return np.where(allowed, self.candidate_scores[u_idx], -1e9).astype(np.float32)
 
 
 def _extract_env_cache(env: Any) -> dict[str, Any]:
@@ -347,8 +331,20 @@ def evaluate_policy(
     policy: Any,
     num_episodes: int = 250,
     seed: Optional[int] = 42,
-) -> dict[str, float]:
+    user_indices: Optional[Sequence[int]] = None,
+    return_per_episode: bool = False,
+) -> dict[str, Any]:
     """Evaluate a recommendation policy or DQNAgent on `env` over `num_episodes` episodes.
+
+    When `user_indices` is given, every listed pool user is evaluated exactly once (one episode
+    each, `num_episodes` is ignored), which removes user-sampling noise from the comparison.
+    Padding slots (`cand_items == -1`) never count toward catalog coverage.
+
+    When `return_per_episode` is true, the result also holds `per_episode`: one record per
+    episode, in evaluation order, with `user_idx`, `return`, `ndcg_at_10`, `precision_at_10`,
+    `hits` (number of hits in the episode), `length` (steps), `step_hits` (0/1 per step), and
+    `num_relevant` (liked slots in the session, the recall/NDCG denominator). Paired
+    statistical tests and metrics at other cut-offs are computed from these records.
 
     Returns a dictionary containing:
         - `mean_return`: Mean cumulative episode reward
@@ -363,7 +359,9 @@ def evaluate_policy(
         - `catalog_coverage`: Fraction of unique catalog/candidate items recommended
         - `mean_novelty_bits`: Mean self-information novelty (in bits) of recommended items
         - `intra_list_diversity`: Mean intra-list cosine diversity among recommended items
+        - `per_episode`: only when `return_per_episode` is true (see above)
     """
+    per_episode: list[dict[str, Any]] = []
     episode_returns: list[float] = []
     episode_lengths: list[int] = []
     all_step_hits: list[float] = []
@@ -412,16 +410,20 @@ def evaluate_policy(
 
     discounts_10 = 1.0 / np.log2(np.arange(2, 12, dtype=np.float32))
 
-    for ep in range(int(num_episodes)):
+    eval_users = None if user_indices is None else [int(u) for u in user_indices]
+    n_episodes = len(eval_users) if eval_users is not None else int(num_episodes)
+
+    for ep in range(n_episodes):
         if hasattr(policy, "reset"):
             policy.reset()
 
         # Support both env.reset(seed=...) and env.reset()
         try:
-            if seed is not None and ep == 0:
-                reset_out = env.reset(seed=int(seed))
+            seed_kw = {"seed": int(seed)} if (seed is not None and ep == 0) else {}
+            if eval_users is not None:
+                reset_out = env.reset(options={"user_idx": eval_users[ep]}, **seed_kw)
             else:
-                reset_out = env.reset()
+                reset_out = env.reset(**seed_kw)
         except TypeError:
             reset_out = env.reset()
 
@@ -446,7 +448,8 @@ def evaluate_policy(
 
         if user_idx is not None and cand_items_arr is not None and 0 <= int(user_idx) < len(cand_items_arr):
             for c_item in np.asarray(cand_items_arr[int(user_idx)]).reshape(-1):
-                all_seen_candidate_items.add(int(c_item))
+                if int(c_item) >= 0:  # padding slots hold -1
+                    all_seen_candidate_items.add(int(c_item))
 
         done = False
         ep_return = 0.0
@@ -504,8 +507,9 @@ def evaluate_policy(
             ):
                 item_id = int(cand_items_arr[int(user_idx)][action])
             if item_id is not None:
-                recommended_items.add(item_id)
-                ep_chosen_items.append(item_id)
+                if item_id >= 0:  # padding slots (-1) are not catalog items
+                    recommended_items.add(item_id)
+                    ep_chosen_items.append(item_id)
             elif user_idx is not None:
                 recommended_items.add(int(user_idx) * 50 + action)
 
@@ -632,6 +636,28 @@ def evaluate_policy(
         ap_10 = float(np.sum((cum_hits / ranks) * hits_10) / float(ideal_k))
         maps_10.append(ap_10)
 
+        if return_per_episode:
+            per_episode.append(
+                {
+                    "user_idx": None if user_idx is None else int(user_idx),
+                    "return": float(ep_return),
+                    "ndcg_at_10": ndcgs_10[-1],
+                    "precision_at_10": precisions_10[-1],
+                    "hits": int(sum(ep_hits)),
+                    "length": int(ep_steps),
+                    "step_hits": [int(h) for h in ep_hits],
+                    "num_relevant": int(
+                        _infer_total_relevant(
+                            env=env,
+                            user_idx=user_idx,
+                            initial_state=initial_state,
+                            info=last_step_info,
+                            observed_hits=int(sum(ep_hits)),
+                        )
+                    ),
+                }
+            )
+
     # Compute catalog coverage
     total_catalog_size: Optional[int] = None
     for attr in ("num_items", "n_items", "catalog_size", "total_items"):
@@ -649,7 +675,7 @@ def evaluate_policy(
     else:
         coverage = float(len(recommended_action_slots) / 50.0)
 
-    return {
+    results: dict[str, Any] = {
         "mean_return": float(np.mean(episode_returns)) if episode_returns else 0.0,
         "std_return": float(np.std(episode_returns)) if episode_returns else 0.0,
         "mean_length": float(np.mean(episode_lengths)) if episode_lengths else 0.0,
@@ -663,3 +689,6 @@ def evaluate_policy(
         "mean_novelty_bits": float(np.mean(all_step_novelties)) if all_step_novelties else 0.0,
         "intra_list_diversity": float(np.mean(episode_ilds)) if episode_ilds else 0.0,
     }
+    if return_per_episode:
+        results["per_episode"] = per_episode
+    return results
