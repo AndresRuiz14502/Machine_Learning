@@ -1,0 +1,51 @@
+\section{Results and Discussion}
+\label{sec:results}
+
+\input{tables/test_results}
+
+\subsection{Environment Validation}
+\label{sec:res_env}
+
+The uniform random policy without masking obtains a mean return of $-0.4818$ (SD 4.54) over 100 episodes of 8.57 steps on average. Forty percent of the episodes end by abandonment and the rest reach the horizon, the hit rate is 0.318, and 7.35\% of the actions repeat a movie while 13.54\% pick a padding slot; all 50 actions are sampled and every observation stays inside the observation space. Any policy that respects the mask and ranks liked movies first must clear this floor, and the masked Random baseline of Table~\ref{tab:test_comparison} already does so with a test return of 3.4839.
+
+\subsection{Hyperparameter Search}
+\label{sec:res_search}
+
+\input{tables/hyperparameters}
+
+Table~\ref{tab:hyperparameters} and Fig.~\ref{fig:search} show that the architecture matters more than any single hyperparameter. Every flat run stays between 5.4670 and 5.9346 in smoothed validation return, below the masked Bias baseline, because its per-slot advantage heads must learn each slot separately from 227 users. Every slot-shared run beats every flat run. The lower learning rate $\eta = 10^{-4}$ gives the best smoothed return, 7.7413, and the most stable curve; the fast exploration decay is second (7.2668). Retrained for 1{,}500 episodes, the champion reaches its best validation return of 7.9767 at episode 520 and a smoothed return of 7.7152, while the $\gamma = 0$ ablation peaks at 8.0375 with a smoothed 7.4985. On the same 57 validation users, Greedy FunkSVD returns 8.1659 and Greedy HybridNeuMF 7.9568.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.92\textwidth]{figures/fig3_hyperparameter_learning_curves.png}
+\caption{Hyperparameter search. (a) Greedy validation return of the grid runs and of the champion during training. (b) Smoothed validation return (mean $\pm$ SD of the last five evaluations) of every run, the champion and the $\gamma = 0$ ablation.}
+\label{fig:search}
+\end{figure*}
+
+\subsection{Test Results and Comparison with W1 and W2}
+\label{sec:res_test}
+
+On the 177 held-out test sessions (Table~\ref{tab:test_comparison}), the D3QN champion returns 6.4798 at $K = 10$, against 6.5536 for Greedy FunkSVD and 6.5495 for Greedy HybridNeuMF. The paired return differences are $-0.0737$ (95\% CI $[-0.2765, 0.1315]$, Wilcoxon $p = 0.675$) and $-0.0697$ (CI $[-0.3711, 0.2226]$, $p = 0.4321$), so the return of the agent is statistically indistinguishable from both supervised rankers. Ranking quality is a different matter: the champion's NDCG@10 of 0.6767 is below the 0.6972 of FunkSVD (CI $[-0.0393, -0.0044]$, $p = 0.0404$) and the 0.7088 of HybridNeuMF (CI $[-0.0595, -0.0072]$, $p = 0.197$). The agent buys part of its return with diversity instead: its coverage (27.79\%) and novelty (12.77 bits) exceed those of both greedy rankers, since the genre and novelty bonuses reward hits on less popular movies. At $K = 20$ the ordering holds, with 10.8422 for the champion against 10.9680 and 10.8601. Against its own $\gamma = 0$ copy the champion gains 0.1488 in return (CI $[-0.0468, 0.3394]$, $p = 0.0553$) and wins on 91 users against 71, a positive but not significant value of planning.
+
+The supervised references come from a different protocol. W1 reported an NDCG@10 of 0.5881 and W2 one of 0.7663, both from ranking each test user's liked movies among sampled unrated movies, and W2 lowered the test RMSE from 0.8041 to 0.7994. Inside the simulator, where both models act on the same slates, their difference almost vanishes (return difference $-0.004$, $p = 0.6023$).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig7_sample_efficiency.png}
+\caption{Sample efficiency on the 57 validation sessions: validation NDCG@10 (a) and return (b) of the champion and the $\gamma = 0$ ablation against cumulative training steps; horizontal lines are the baselines on the same sessions.}
+\label{fig:efficiency}
+\end{figure}
+
+\subsection{Sample Efficiency}
+\label{sec:res_eff}
+
+Fig.~\ref{fig:efficiency} places the champion's validation curve against cumulative environment steps. The greedy policy beats Random from the first evaluation, passes Bias and Popularity after 356 steps, and passes Greedy HybridNeuMF in return after 3{,}794 steps (1{,}508 for NDCG@10), but it never passes Greedy FunkSVD on the validation users. The supervised models need no interaction at all once trained, but they consume the 1.9 million training ratings; the agent reuses their FunkSVD features and adds only a few thousand interactions, so in this setting RL refines a supervised ranker rather than replacing it.
+
+\subsection{Discussion}
+\label{sec:discussion}
+
+RL did not beat supervised learning here. The two assumptions of Section~\ref{sec:mdp} explain why: with fixed ratings and slates restricted to rated movies, the best possible policy is close to ranking the slate by the probability of a like, which is exactly what the greedy rankers do, and abandonment after five misses should be rare for a policy whose precision is above 0.6. What the agent learned is a scoring rule over FunkSVD score, session cosine and novelty that matches the rankers in return while trading ranking precision for coverage.
+
+\emph{Challenges and lessons.}
+\label{sec:challenges}
+The first version of this workshop reported large gains over the baselines that came from leakage: its observation contained features derived from the held-out ratings, so a single feature separated liked from disliked slots with an AUC of 1.0 and a cosine rule hit every time. We rebuilt the sessions from real post-cut ratings, ordered slots by a static score, and added leakage tests with fixed thresholds that now guard every run. The second lesson concerns exploration and capacity. With 227 training users, the flat network, which sees the raw user and session vectors, never reached the Bias baseline on validation, while sharing one scorer across slots and lowering the learning rate turned the same data into a policy competitive with the supervised rankers. Slow $\epsilon$ decay wasted part of the 800-episode budget, and the gap between best and smoothed validation returns shows that checkpoint selection on 57 users is noisy.

@@ -123,7 +123,7 @@ def render_hyperparameter_table(metrics: Dict[str, Any]) -> str:
     # Selection rule of train.py: highest smoothed validation return among the grid runs
     selected = max(grid, key=lambda r: r["smoothed_val_return"])["config_id"] if grid else None
     labels = {
-        "cfg1_baseline": r"Base ($\eta{=}5{\times}10^{-4}$, $\gamma{=}0.95$, $\delta_\epsilon{=}0.995$, $\lambda{=}10^{-5}$)",
+        "cfg1_baseline": r"Base (see text)",
         "cfg2_high_lr": r"$\eta = 10^{-3}$",
         "cfg3_low_lr": r"$\eta = 10^{-4}$",
         "cfg4_gamma_090": r"$\gamma = 0.90$",
