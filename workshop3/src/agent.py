@@ -74,6 +74,99 @@ class DuelingQNetwork(nn.Module):
         return q_values
 
 
+class SlotDuelingQNetwork(nn.Module):
+    """Slot-equivariant Dueling Q-Network: one shared scorer for every candidate slot.
+
+    The 250-D state is split into per-slot features x_a = [similarity, FunkSVD score, novelty,
+    unavailable flag, slot rank] (from state[0:200]) and the 10 session progress scalars
+    (state[240:250]). The raw user factor and session vector (state[200:240]) are not fed to
+    the network: they identify each training user, which lets a network memorize the few
+    training sessions instead of learning a scoring rule. Personalization still enters through
+    the FunkSVD score and the feedback-updated session similarity of every slot.
+
+    A context MLP embeds the scalars, a shared MLP scores every slot from [x_a, context], and
+    the dueling head combines a state value with the mean-centred advantages:
+
+        Q(s, a) = V(s) + (A(s, a) - mean_a' A(s, a'))
+
+    Sharing the scorer across slots lets one transition on slot a inform the Q-values of all
+    slots with similar features, instead of training 50 independent output units.
+    """
+
+    def __init__(
+        self,
+        state_dim: int = 250,
+        action_dim: int = 50,
+        hidden_dim: int = 128,
+        latent_dim: int = 20,
+    ) -> None:
+        super().__init__()
+        self.state_dim = int(state_dim)
+        self.action_dim = int(action_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.n_slot_features = 5
+        self.context_start = 4 * self.action_dim + 2 * int(latent_dim)
+        self.context_dim = self.state_dim - self.context_start
+        if self.context_dim <= 0:
+            raise ValueError("state_dim must hold 4 per-slot blocks, 2 latent vectors and scalars")
+        ctx_hidden = max(16, self.hidden_dim // 2)
+
+        self.context_net = nn.Sequential(
+            nn.Linear(self.context_dim, ctx_hidden),
+            nn.LayerNorm(ctx_hidden),
+            nn.ReLU(),
+        )
+        self.slot_net = nn.Sequential(
+            nn.Linear(self.n_slot_features + ctx_hidden, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim // 2),
+            nn.ReLU(),
+        )
+        self.advantage_head = nn.Linear(self.hidden_dim // 2, 1)
+        self.value_head = nn.Sequential(
+            nn.Linear(ctx_hidden + self.hidden_dim // 2, self.hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim // 2, 1),
+        )
+        rank = torch.linspace(0.0, 1.0, self.action_dim)
+        self.register_buffer("slot_rank", rank)
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.kaiming_uniform_(module.weight, nonlinearity="relu")
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        squeeze = state.dim() == 1
+        if squeeze:
+            state = state.unsqueeze(0)
+        m = self.action_dim
+        slot_feats = state[:, : 4 * m].reshape(state.shape[0], 4, m).transpose(1, 2)  # (B, M, 4)
+        rank = self.slot_rank.expand(state.shape[0], m).unsqueeze(-1)  # (B, M, 1)
+        x_slots = torch.cat([slot_feats, rank], dim=-1)  # (B, M, 5)
+
+        ctx = self.context_net(state[:, self.context_start :])  # (B, C)
+        ctx_rep = ctx.unsqueeze(1).expand(-1, m, -1)  # (B, M, C)
+        h = self.slot_net(torch.cat([x_slots, ctx_rep], dim=-1))  # (B, M, H/2)
+
+        advantage = self.advantage_head(h).squeeze(-1)  # (B, M)
+        value = self.value_head(torch.cat([ctx, h.mean(dim=1)], dim=-1))  # (B, 1)
+        q_values = value + (advantage - advantage.mean(dim=-1, keepdim=True))
+        return q_values.squeeze(0) if squeeze else q_values
+
+
+def build_q_network(architecture: str, state_dim: int, action_dim: int, hidden_dim: int) -> nn.Module:
+    """Return the Q-network for ``architecture`` ('flat' MLP over the whole state or 'slot')."""
+    if architecture == "flat":
+        return DuelingQNetwork(state_dim=state_dim, action_dim=action_dim, hidden_dim=hidden_dim)
+    if architecture == "slot":
+        return SlotDuelingQNetwork(state_dim=state_dim, action_dim=action_dim, hidden_dim=hidden_dim)
+    raise ValueError(f"Unknown Q-network architecture '{architecture}' (expected 'flat' or 'slot')")
+
+
 class ReplayBuffer:
     """Preallocated NumPy Experience Replay Buffer for fast batch sampling onto GPU/CPU."""
 
@@ -190,10 +283,12 @@ class DQNAgent:
         grad_clip: float = 1.0,
         seed: int = 42,
         device: Optional[torch.device | str] = None,
+        architecture: str = "flat",
     ) -> None:
         self.state_dim = int(state_dim)
         self.action_dim = int(action_dim)
         self.hidden_dim = int(hidden_dim)
+        self.architecture = str(architecture)
         self.lr = float(lr)
         self.gamma = float(gamma)
         self.epsilon_start = float(epsilon_start)
@@ -218,24 +313,7 @@ class DQNAgent:
             torch.cuda.manual_seed_all(self.seed)
         self.rng = np.random.default_rng(self.seed)
 
-        self.policy_net = DuelingQNetwork(
-            state_dim=self.state_dim,
-            action_dim=self.action_dim,
-            hidden_dim=self.hidden_dim,
-        ).to(self.device)
-        self.target_net = DuelingQNetwork(
-            state_dim=self.state_dim,
-            action_dim=self.action_dim,
-            hidden_dim=self.hidden_dim,
-        ).to(self.device)
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.target_net.eval()
-
-        self.optimizer = torch.optim.AdamW(
-            self.policy_net.parameters(),
-            lr=self.lr,
-            weight_decay=self.weight_decay,
-        )
+        self._build_networks()
 
         self.replay_buffer = ReplayBuffer(
             capacity=self.buffer_capacity,
@@ -249,6 +327,23 @@ class DQNAgent:
 
         self.update_steps = 0
         self.episodes_done = 0
+
+    def _build_networks(self) -> None:
+        """(Re)build policy/target networks and the optimizer for the current architecture."""
+        self.policy_net = build_q_network(
+            self.architecture, self.state_dim, self.action_dim, self.hidden_dim
+        ).to(self.device)
+        self.target_net = build_q_network(
+            self.architecture, self.state_dim, self.action_dim, self.hidden_dim
+        ).to(self.device)
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.target_net.eval()
+
+        self.optimizer = torch.optim.AdamW(
+            self.policy_net.parameters(),
+            lr=self.lr,
+            weight_decay=self.weight_decay,
+        )
 
     def reset(self) -> None:
         """No-op reset hook for compatibility with BasePolicy evaluation interfaces."""
@@ -424,6 +519,7 @@ class DQNAgent:
             "state_dim": self.state_dim,
             "action_dim": self.action_dim,
             "hidden_dim": self.hidden_dim,
+            "architecture": self.architecture,
             "lr": self.lr,
             "gamma": self.gamma,
             "epsilon_start": self.epsilon_start,
@@ -457,6 +553,16 @@ class DQNAgent:
         """Load policy/target networks, optimizer state, and configuration from disk."""
         path = Path(filepath)
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        saved = checkpoint.get("config", {})
+        saved_arch = str(saved.get("architecture", "flat"))
+        saved_hidden = int(saved.get("hidden_dim", self.hidden_dim))
+        if saved_arch != self.architecture or saved_hidden != self.hidden_dim:
+            # Rebuild the networks so any checkpoint loads into a matching architecture
+            self.architecture, self.hidden_dim = saved_arch, saved_hidden
+            self._build_networks()
+        for key in ("gamma", "lr", "weight_decay", "epsilon_decay"):
+            if key in saved:
+                setattr(self, key, float(saved[key]))
         self.policy_net.load_state_dict(checkpoint["policy_state_dict"])
         if "target_state_dict" in checkpoint:
             self.target_net.load_state_dict(checkpoint["target_state_dict"])
