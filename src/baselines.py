@@ -1,4 +1,4 @@
-"""Metrics and baseline models (Popularity, Bias, kNN item-item, and tabular models)."""
+"""Metrics, baseline models (Popularity, Bias, kNN item-item, tabular models), and FunkSVD."""
 
 import sys
 import time
@@ -418,8 +418,120 @@ def run_classification_baselines(
     return classifiers
 
 
-def run_all_baselines():
-    """Run end-to-end loading, feature engineering, and all baselines."""
+class FunkSVD:
+    """Biased Matrix Factorization (FunkSVD) trained via Stochastic Gradient Descent (SGD).
+
+    Prediction rule:
+        r_hat_{u,i} = mu + b_u + b_i + p_u^T q_i
+    """
+
+    def __init__(
+        self,
+        n_users: int,
+        n_items: int,
+        n_factors: int = 50,
+        lr: float = 0.01,
+        reg: float = 0.05,
+        n_epochs: int = 20,
+        seed: int = SEED,
+    ):
+        self.n_users = n_users
+        self.n_items = n_items
+        self.n_factors = n_factors
+        self.lr = lr
+        self.reg = reg
+        self.n_epochs = n_epochs
+        self.seed = seed
+        self.mu = 0.0
+        self.bu = np.zeros(n_users, dtype=np.float32)
+        self.bi = np.zeros(n_items, dtype=np.float32)
+        rng = np.random.default_rng(seed)
+        self.P = rng.normal(0.0, 0.1, size=(n_users, n_factors)).astype(np.float32)
+        self.Q = rng.normal(0.0, 0.1, size=(n_items, n_factors)).astype(np.float32)
+        self.val_rmse_history: list[float] = []
+
+    def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None, verbose: bool = True):
+        u_arr = train_df["u"].to_numpy(dtype=np.int32)
+        i_arr = train_df["i"].to_numpy(dtype=np.int32)
+        r_arr = train_df["rating"].to_numpy(dtype=np.float32)
+        self.mu = float(r_arr.mean())
+        n_obs = len(r_arr)
+        rng = np.random.default_rng(self.seed)
+        lr = np.float32(self.lr)
+        reg = np.float32(self.reg)
+
+        for epoch in range(1, self.n_epochs + 1):
+            order = rng.permutation(n_obs)
+            for idx in order:
+                u = u_arr[idx]
+                i = i_arr[idx]
+                pred = self.mu + self.bu[u] + self.bi[i] + float(np.dot(self.P[u], self.Q[i]))
+                err = r_arr[idx] - pred
+                self.bu[u] += lr * (err - reg * self.bu[u])
+                self.bi[i] += lr * (err - reg * self.bi[i])
+                pu_old = self.P[u].copy()
+                self.P[u] += lr * (err * self.Q[i] - reg * pu_old)
+                self.Q[i] += lr * (err * pu_old - reg * self.Q[i])
+
+            if val_df is not None:
+                val_preds = self.predict_df(val_df)
+                val_r = rmse(val_df["rating"].to_numpy(), clip_rating(val_preds))
+                self.val_rmse_history.append(val_r)
+                if verbose and (epoch == 1 or epoch % 5 == 0 or epoch == self.n_epochs):
+                    print(f"  [FunkSVD k={self.n_factors}] Epoch {epoch:02d}/{self.n_epochs} | Val RMSE={val_r:.4f}")
+        return self
+
+    def predict_df(self, df_part: pd.DataFrame) -> np.ndarray:
+        u_idx = df_part["u"].to_numpy(dtype=np.int32)
+        i_idx = df_part["i"].to_numpy(dtype=np.int32)
+        dots = np.sum(self.P[u_idx] * self.Q[i_idx], axis=1)
+        return self.mu + self.bu[u_idx] + self.bi[i_idx] + dots
+
+    def score_candidates(self, u: int, items: np.ndarray) -> np.ndarray:
+        return self.mu + self.bu[u] + self.bi[items] + (self.Q[items] @ self.P[u])
+
+
+def run_funksvd(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    n_users: int,
+    n_items: int,
+    results: dict,
+    ranking_results: dict,
+    n_factors: int = 50,
+    lr: float = 0.01,
+    reg: float = 0.05,
+    n_epochs: int = 20,
+    seed: int = SEED,
+) -> FunkSVD:
+    """Train and evaluate FunkSVD on rating prediction and Top-K ranking."""
+    model = FunkSVD(
+        n_users=n_users,
+        n_items=n_items,
+        n_factors=n_factors,
+        lr=lr,
+        reg=reg,
+        n_epochs=n_epochs,
+        seed=seed,
+    )
+    model.fit(train_df, val_df=val_df, verbose=True)
+    yhat_test = model.predict_df(test_df)
+    log_result(results, f"FunkSVD (k={n_factors})", test_df["rating"], yhat_test)
+    ranking_results["FunkSVD"] = evaluate_ranking(
+        model.score_candidates, train_df, test_df, n_items
+    )
+    print("FunkSVD", {k: round(v, 4) for k, v in ranking_results["FunkSVD"].items()})
+    return model
+
+
+def run_all_baselines(include_funksvd: bool = False):
+    """Run end-to-end loading, feature engineering, and all baselines.
+
+    FunkSVD is opt-in (`include_funksvd=True` or `python -m src.baselines --funksvd`).
+    It backs the Workshop 1 matrix factorization figures cited by the Workshop 3
+    report (Test RMSE 0.8041 for k=50) without changing the default Workshop 1 output.
+    """
     data = prepare_datasets(save_splits_file=False, verbose=True)
     feats = prepare_features(
         data["train_df"],
@@ -465,6 +577,17 @@ def run_all_baselines():
         feats["FEATURE_COLS"],
         classification_results,
     )
+    funksvd_model = None
+    if include_funksvd:
+        funksvd_model = run_funksvd(
+            data["train_df"],
+            data["val_df"],
+            data["test_df"],
+            data["n_users"],
+            data["n_items"],
+            results,
+            ranking_results,
+        )
     return {
         "data": data,
         "features": feats,
@@ -474,8 +597,9 @@ def run_all_baselines():
         "pop_vec": pop_vec,
         "bu_arr": bu_arr,
         "bi_vec": bi_vec,
+        "funksvd_model": funksvd_model,
     }
 
 
 if __name__ == "__main__":
-    run_all_baselines()
+    run_all_baselines(include_funksvd="--funksvd" in sys.argv[1:])
