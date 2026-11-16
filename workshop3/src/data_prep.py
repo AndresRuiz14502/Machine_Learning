@@ -7,6 +7,11 @@ trains a fast vectorized FunkSVD model (k=20, lr=0.01, reg=0.02, 15 epochs)
 to extract static user/item latent factors and biases, and constructs the
 per-user candidate pools (M=50) and ground-truth/oracle evaluation splits
 for the Gymnasium sequential recommendation environment.
+
+Raw CSVs (ratings.csv, movies.csv) are read from <repo>/dataSet/ when present,
+with workshop3/data/ml-32m/ml-32m/ as fallback; outputs go to workshop3/data/.
+Default paths are resolved against the repository root, so the script can be
+launched with any working directory.
 """
 
 from __future__ import annotations
@@ -19,6 +24,17 @@ from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
+
+# <repo>/workshop3/src/data_prep.py -> parents[2] is the repository root.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+W3_DATA_DIR = REPO_ROOT / "workshop3" / "data"
+
+# Folders searched for the raw MovieLens 32M CSVs, in priority order: the
+# repository-level dataSet/ folder shared with Workshops 1-2, then the W3 fallback.
+RAW_DATA_DIRS = (
+    REPO_ROOT / "dataSet",
+    W3_DATA_DIR / "ml-32m" / "ml-32m",
+)
 
 ALL_GENRES = [
     "Action",
@@ -43,14 +59,30 @@ ALL_GENRES = [
 ]
 
 
+def resolve_raw_csv(filename: str) -> Path:
+    """Return the first existing raw MovieLens 32M ``filename`` among ``RAW_DATA_DIRS``."""
+    candidates = [directory / filename for directory in RAW_DATA_DIRS]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    searched = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"[data_prep] {filename} not found. Searched: {searched}")
+
+
 def load_and_filter_movielens(
-    ratings_path: str = "workshop3/data/ml-32m/ml-32m/ratings.csv",
-    movies_path: str = "workshop3/data/ml-32m/ml-32m/movies.csv",
+    ratings_path: str | Path | None = None,
+    movies_path: str | Path | None = None,
     n_sample_users: int = 15000,
     min_interactions: int = 10,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
-    """Load MovieLens 32M, sample 15,000 complete users (seed=42), and iteratively filter <10 ratings."""
+    """Load MovieLens 32M, sample 15,000 complete users (seed=42), and iteratively filter <10 ratings.
+
+    ``ratings_path``/``movies_path`` default to ``resolve_raw_csv("ratings.csv")`` and
+    ``resolve_raw_csv("movies.csv")``.
+    """
+    ratings_path = resolve_raw_csv("ratings.csv") if ratings_path is None else ratings_path
+    movies_path = resolve_raw_csv("movies.csv") if movies_path is None else movies_path
     t0 = time.time()
     print(f"[data_prep] Loading ratings from {ratings_path} ...")
     df = pd.read_csv(
@@ -684,8 +716,8 @@ def build_rl_candidate_pools(
 def main() -> None:
     t_start = time.time()
     sub, movies_sub, base_stats = load_and_filter_movielens(
-        ratings_path="workshop3/data/ml-32m/ml-32m/ratings.csv",
-        movies_path="workshop3/data/ml-32m/ml-32m/movies.csv",
+        ratings_path=resolve_raw_csv("ratings.csv"),
+        movies_path=resolve_raw_csv("movies.csv"),
         n_sample_users=15000,
         min_interactions=10,
         seed=42,
@@ -707,7 +739,7 @@ def main() -> None:
         seed=42,
     )
 
-    out_dir = Path("workshop3/data")
+    out_dir = W3_DATA_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cache_path = out_dir / "processed_cache.npz"

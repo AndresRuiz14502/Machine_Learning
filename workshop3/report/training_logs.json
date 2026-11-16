@@ -2,7 +2,7 @@
   "device": "cuda",
   "total_wall_time_sec": 276.75,
   "best_grid_config_id": "cfg1_baseline",
-  "champion_checkpoint": "C:\\Users\\matth\\Desktop\\machine_learning--workshops\\workshop3\\checkpoints\\agent_best.pt",
+  "champion_checkpoint": "workshop3/checkpoints/agent_best.pt",
   "hyperparameter_table": [
     {
       "config_id": "cfg1_baseline",

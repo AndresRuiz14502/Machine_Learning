@@ -33,6 +33,12 @@ from workshop3.src.agent import DQNAgent
 from workshop3.src.baselines import evaluate_policy
 from workshop3.src.env import MovieLensRecEnv
 
+
+def repo_relative_posix(path: Path) -> str:
+    """Return ``path`` relative to the repository root as a POSIX string (portable JSON logs)."""
+    return Path(path).resolve().relative_to(PROJECT_ROOT).as_posix()
+
+
 HYPERPARAMETER_CONFIGS: List[Dict[str, Any]] = [
     {
         "config_id": "cfg1_baseline",
@@ -719,7 +725,7 @@ def main() -> None:
         "device": device_str,
         "total_wall_time_sec": round(time.time() - t0, 2),
         "best_grid_config_id": best_cfg_res["config_id"],
-        "champion_checkpoint": str(best_ckpt_path),
+        "champion_checkpoint": repo_relative_posix(best_ckpt_path),
         "hyperparameter_table": hyperparameter_table,
         "grid_runs": {r["config_id"]: r for r in grid_results},
         "champion_run": tuned_res,
