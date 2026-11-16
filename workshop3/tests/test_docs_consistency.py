@@ -83,7 +83,9 @@ VERSIONED_ARTIFACTS = (
     "workshop3/requirements.txt",
     "workshop3/group7_workshop3.pdf",
     "workshop3/checkpoints/agent_best.pt",
+    "workshop3/checkpoints/bandit_gamma0.pt",
     "workshop3/data/processed_cache.npz",
+    "workshop3/data/w2_candidate_scores.npz",
     "workshop3/data/dataset_stats.json",
     "workshop3/data/movie_lookup.json",
     "workshop3/notebooks/w3_reinforcement_learning.ipynb",
@@ -363,8 +365,24 @@ def test_movie_count_is_official_everywhere() -> None:
 def test_dataset_statistics_match_dataset_stats_json() -> None:
     stats = _dataset_stats()
     expected = {
-        "workshop3/README.md": ("total_raw_ratings", "total_raw_users", "filtered_ratings", "filtered_users", "filtered_movies"),
-        "workshop3/report (main.tex + sections)": ("filtered_ratings", "filtered_users", "filtered_movies"),
+        "workshop3/README.md": (
+            "total_raw_ratings",
+            "total_raw_users",
+            "filtered_ratings",
+            "filtered_users",
+            "filtered_movies",
+            "rl_train_users",
+            "rl_val_users",
+            "rl_test_users",
+        ),
+        "workshop3/report (main.tex + sections)": (
+            "filtered_ratings",
+            "filtered_users",
+            "filtered_movies",
+            "rl_train_users",
+            "rl_val_users",
+            "rl_test_users",
+        ),
     }
     problems = []
     for name, keys in expected.items():
@@ -426,8 +444,8 @@ def test_every_four_decimal_number_is_traceable_to_a_json_source() -> None:
 # Workshop 1 / Workshop 2 references
 # --------------------------------------------------------------------------------------
 def test_metrics_summary_has_workshop2_reference_matching_main() -> None:
-    block = _metrics().get("workshop2_comparison", {}).get("w2_hybrid_neumf_full_catalog")
-    assert block, "metrics_summary.json lacks workshop2_comparison.w2_hybrid_neumf_full_catalog"
+    block = _metrics().get("workshop2_comparison", {}).get("w2_hybrid_neumf_static")
+    assert block, "metrics_summary.json lacks workshop2_comparison.w2_hybrid_neumf_static"
     official = _load_json(W2_SUMMARY)
     ranking = official["ranking_comparison"]["HybridNeuMF (W2 Deep CF)"]
     expected = {
@@ -448,7 +466,7 @@ def test_metrics_summary_has_workshop2_reference_matching_main() -> None:
 
 
 def test_docs_cite_workshop2_reference_numbers() -> None:
-    block = _metrics().get("workshop2_comparison", {}).get("w2_hybrid_neumf_full_catalog", {})
+    block = _metrics().get("workshop2_comparison", {}).get("w2_hybrid_neumf_static", {})
     assert block, "metrics_summary.json lacks the Workshop 2 reference block"
     problems = []
     for name in ("workshop3/README.md", "workshop3/report (main.tex + sections)"):

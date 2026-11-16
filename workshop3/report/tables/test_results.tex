@@ -1,0 +1,24 @@
+\begin{table*}[t]
+\centering
+\caption{Held-out test sessions (177 users, one episode each). Return is the mean episode return ($\pm$ SD); P, NDCG and MAP are computed at $K$; coverage counts distinct recommended movies over the movies of the evaluated slates; novelty is mean self-information in bits. Best value per column in bold.}
+\label{tab:test_comparison}
+\footnotesize
+\setlength{\tabcolsep}{3.2pt}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}l cccccc cccccc@{}}
+\toprule
+ & \multicolumn{6}{c}{$K = 10$} & \multicolumn{6}{c}{$K = 20$} \\
+\cmidrule(lr){2-7}\cmidrule(lr){8-13}
+Policy & Return & P & NDCG & MAP & Cov. & Nov. & Return & P & NDCG & MAP & Cov. & Nov. \\
+\midrule
+Random & 3.4839 $\pm$ 4.12 & 0.4497 & 0.4706 & 0.3330 & \textbf{34.10\%} & \textbf{13.16} & 6.6112 $\pm$ 7.49 & 0.4119 & 0.4723 & 0.3254 & \textbf{50.51\%} & \textbf{13.07} \\
+Popularity & 4.1500 $\pm$ 4.12 & 0.5079 & 0.5335 & 0.3993 & 21.01\% & 10.50 & 7.2497 $\pm$ 7.44 & 0.4486 & 0.5259 & 0.3765 & 37.59\% & 11.24 \\
+Bias ($\mu + b_u + b_i$) & 6.2347 $\pm$ 4.15 & 0.6350 & 0.6622 & 0.5425 & 22.72\% & 12.67 & 10.4907 $\pm$ 7.44 & 0.5613 & 0.6621 & 0.5216 & 42.04\% & 12.85 \\
+Greedy FunkSVD (W1) & \textbf{6.5536 $\pm$ 4.12} & 0.6565 & 0.6972 & 0.5826 & 27.04\% & 12.50 & \textbf{10.9680 $\pm$ 7.67} & \textbf{0.5749} & 0.6926 & 0.5591 & 45.67\% & 12.80 \\
+Greedy HybridNeuMF (W2) & 6.5495 $\pm$ 4.07 & \textbf{0.6576} & \textbf{0.7088} & \textbf{0.5906} & 25.35\% & 12.32 & 10.8601 $\pm$ 7.63 & 0.5701 & \textbf{0.6985} & \textbf{0.5626} & 43.23\% & 12.61 \\
+Myopic DQN ($\gamma$ = 0) & 6.3310 $\pm$ 4.22 & 0.6379 & 0.6672 & 0.5522 & 27.43\% & 12.58 & 10.8314 $\pm$ 7.73 & 0.5692 & 0.6720 & 0.5368 & 47.16\% & 12.92 \\
+D3QN ($\gamma$ = 0.95, slot-shared) & 6.4798 $\pm$ 4.38 & 0.6480 & 0.6767 & 0.5644 & 27.79\% & 12.77 & 10.8422 $\pm$ 7.76 & 0.5695 & 0.6719 & 0.5389 & 46.86\% & 12.96 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}

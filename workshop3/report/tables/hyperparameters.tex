@@ -1,0 +1,26 @@
+\begin{table}[t]
+\centering
+\caption{Validation return of the grid (800 episodes per run; smoothed = mean of the last five greedy evaluations on the validation sessions; best = maximum over training). Bold: selected run.}
+\label{tab:hyperparameters}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}l cc cc@{}}
+\toprule
+ & \multicolumn{2}{c}{Flat MLP} & \multicolumn{2}{c}{Slot-shared} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Configuration & Smoothed & Best & Smoothed & Best \\
+\midrule
+Base ($\eta{=}5{\times}10^{-4}$, $\gamma{=}0.95$, $\delta_\epsilon{=}0.995$, $\lambda{=}10^{-5}$) & 5.4670 & 5.6754 & 6.5696 & 7.0978 \\
+$\eta = 10^{-3}$ & 5.5207 & 5.6747 & 6.4028 & 6.9497 \\
+$\eta = 10^{-4}$ & 5.5665 & 5.8204 & \textbf{7.7413} & 7.9767 \\
+$\gamma = 0.90$ & 5.7977 & 6.1191 & 6.8265 & 7.2793 \\
+$\gamma = 0.99$ & 5.7975 & 6.1744 & 6.4907 & 7.0952 \\
+$\delta_\epsilon = 0.990$ & 5.7977 & 6.2295 & 7.2668 & 7.8828 \\
+$\delta_\epsilon = 0.998$ & 5.9346 & 6.0652 & 6.9326 & 7.4601 \\
+$\lambda = 10^{-4}$ & 5.8548 & 6.0603 & 6.6366 & 7.4141 \\
+\midrule
+Champion (1{,}500 ep.), Slot-shared & \multicolumn{2}{c}{7.7152 / 7.9767} & & \\
+$\gamma = 0$ ablation (1{,}500 ep.), Slot-shared & \multicolumn{2}{c}{7.4985 / 8.0375} & & \\
+\bottomrule
+\end{tabular}
+\end{table}
