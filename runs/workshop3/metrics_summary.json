@@ -2,12 +2,12 @@
   "evaluation_split": "test",
   "num_test_users": 177,
   "num_validation_users": 57,
-  "evaluation_protocol": "Every policy is evaluated once on every RL test session (test_user_indices of workshop3/data/processed_cache.npz): one episode per test user at horizon 10 (test_k10) and horizon 20 (test_k20). DQN policies act greedily (epsilon = 0) over the valid-action mask; RandomPolicy uses a fresh generator seeded with 42 in every evaluation. Ranking metrics treat a step as relevant when the recommended slot holds a real rating >= 4.0; recall, NDCG and MAP use the number of liked slots of the session as the relevant set. catalog_coverage is the number of distinct movies recommended divided by the number of distinct movies in the evaluated sessions' candidate slates (padding slots excluded).",
+  "evaluation_protocol": "Every policy is evaluated once on every RL test session (test_user_indices of data/processed_cache.npz): one episode per test user at horizon 10 (test_k10) and horizon 20 (test_k20). DQN policies act greedily (epsilon = 0) over the valid-action mask; RandomPolicy uses a fresh generator seeded with 42 in every evaluation. Ranking metrics treat a step as relevant when the recommended slot holds a real rating >= 4.0; recall, NDCG and MAP use the number of liked slots of the session as the relevant set. catalog_coverage is the number of distinct movies recommended divided by the number of distinct movies in the evaluated sessions' candidate slates (padding slots excluded).",
   "device": "cuda",
   "eval_wall_time_sec": 30.7,
   "agents": {
     "D3QN": {
-      "checkpoint": "workshop3/checkpoints/agent_best.pt",
+      "checkpoint": "checkpoints/agent_best.pt",
       "sha256": "4b023c9b61595778b9726dd4115cf32c5d420563a3e48f18161e3600f16aab9f",
       "gamma": 0.95,
       "saved_after_episodes": 520,
@@ -32,7 +32,7 @@
       }
     },
     "MyopicBandit": {
-      "checkpoint": "workshop3/checkpoints/bandit_gamma0.pt",
+      "checkpoint": "checkpoints/bandit_gamma0.pt",
       "sha256": "b976c18346a4b6cae015ae12a3434dbb440ec093a5c89ac0bd6f961cbb2e09e3",
       "gamma": 0.0,
       "saved_after_episodes": 560,
@@ -711,8 +711,8 @@
       "hr_at_10": 0.9661,
       "catalog_coverage_pct": 25.35,
       "novelty_bits": 12.3186,
-      "source": "test_k10.GreedyHybridNeuMF: GreedyHybridNeuMFPolicy acting on workshop3/data/w2_candidate_scores.npz in the Workshop 3 environment",
-      "scores_artifact": "workshop3/data/w2_candidate_scores.npz",
+      "source": "test_k10.GreedyHybridNeuMF: GreedyHybridNeuMFPolicy acting on data/w2_candidate_scores.npz in the Workshop 3 environment",
+      "scores_artifact": "data/w2_candidate_scores.npz",
       "score_definition": "HybridNeuMF.forward(u, i) of checkpoints/model_best.pt in eval mode under torch.no_grad(), without the [0.5, 5.0] clamp used for RMSE (monotone, so the ranking is unchanged); padding slots (cand_valid == 0) hold -1e+09",
       "checkpoint": {
         "epoch": 15,
@@ -3602,10 +3602,10 @@
     }
   ],
   "figures_generated": [
-    "workshop3/report/figures/fig3_hyperparameter_learning_curves.png",
-    "workshop3/report/figures/fig4_exploration_dynamics.png",
-    "workshop3/report/figures/fig5_test_metrics_comparison.png",
-    "workshop3/report/figures/fig6_sample_trajectories.png",
-    "workshop3/report/figures/fig7_sample_efficiency.png"
+    "runs/workshop3/fig3_hyperparameter_learning_curves.png",
+    "runs/workshop3/fig4_exploration_dynamics.png",
+    "runs/workshop3/fig5_test_metrics_comparison.png",
+    "runs/workshop3/fig6_sample_trajectories.png",
+    "runs/workshop3/fig7_sample_efficiency.png"
   ]
 }

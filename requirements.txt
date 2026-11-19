@@ -13,6 +13,7 @@ filelock==4.2.10
 fonttools==4.68.0
 fsspec==2026.9.0
 grpcio==1.85.1
+gymnasium==1.4.0
 ipykernel==7.4.0
 ipython==9.18.1
 ipython_pygments_lexers==1.1.1
@@ -62,6 +63,7 @@ pure_eval==0.2.4
 Pygments==2.21.0
 pynndescent==0.7.0
 pyparsing==3.3.3
+pytest==9.2.0
 python-dateutil==4.0.0
 pyzmq==27.3.0
 scikit-learn==1.9.1

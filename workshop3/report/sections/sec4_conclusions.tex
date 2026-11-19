@@ -1,6 +1,0 @@
-\section{Conclusions}
-\label{sec:conclusions}
-
-We cast movie recommendation on MovieLens 32M as an MDP over real post-cut sessions, built a Gymnasium simulator whose observations contain no hidden labels, and trained a Dueling Double DQN with a slot-shared Q-network. On 177 held-out test users the agent matches the Workshop~1 FunkSVD and Workshop~2 HybridNeuMF rankers in return (differences not significant) with higher coverage and novelty, but it ranks liked movies lower, and its advantage over a $\gamma = 0$ copy of itself is positive but not significant. The main limitations are the simulator's fixed ratings, the restriction to movies each user rated, and the small number of eligible sessions, which together leave little room for sequential planning and make validation-based selection noisy.
-
-Future work should relax these limits: a user model that predicts responses to unrated movies would let the agent explore beyond the logged slates, off-policy evaluation~\cite{levine2020offline} would give less biased estimates than replaying logs, and a slate-level value decomposition such as SlateQ~\cite{ie2019slateq} would scale to recommending several movies per step. Using the W2 HybridNeuMF scores as slot features is a direct next step.

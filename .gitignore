@@ -26,26 +26,10 @@ Thumbs.db
 .venv/
 venv/
 
-# ---------------------------------------------------------------------------
-# Workshop 3 (workshop3/): local-only or regenerable files.
-# Keep these rules narrow. Versioned W3 artifacts (*.json, *.npz, *.pt, *.png,
-# runs/, checkpoints/, workshop3/group7_workshop3.pdf) must stay tracked.
-# ---------------------------------------------------------------------------
-# Portable Tectonic LaTeX engine (~51 MB), kept locally to build the paper.
-workshop3/tools/
-
-# Fallback location of the raw MovieLens 32M CSVs (~900 MB). The preferred
-# location is dataSet/ at the repository root, already ignored through *.csv.
-workshop3/data/ml-32m/
-
-# LaTeX build intermediates (the compiled paper is workshop3/group7_workshop3.pdf).
-workshop3/report/main.pdf
-workshop3/report/**/*.aux
-workshop3/report/**/*.bbl
-workshop3/report/**/*.blg
-workshop3/report/**/*.log
-workshop3/report/**/*.out
-workshop3/report/**/*.synctex.gz
-workshop3/report/**/*.fls
-workshop3/report/**/*.fdb_latexmk
-workshop3/report/**/*.toc
+# Local-only report generation, compiled PDFs, auxiliary tests, and raw fallback CSVs
+# (kept locally on disk, excluded from the git branch)
+report/
+tools/
+tests/
+*.pdf
+data/ml-32m/

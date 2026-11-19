@@ -3,7 +3,7 @@ Gymnasium environment for Sequential Movie Recommendation on MovieLens 32M (Work
 
 Implements `MovieLensRecEnv(gymnasium.Env)` with:
 - Discrete(50) candidate slot action space. A slot holds one real rating of the session
-  (see `data_prep.py`); sessions shorter than 50 ratings are padded with invalid slots that
+  (see `data_loader.py`); sessions shorter than 50 ratings are padded with invalid slots that
   start masked (`valid_mask == 0`).
 - Box(250,) state space built only from training-split statistics and observed feedback:
   cosine similarity between each candidate's FunkSVD item factor and the session vector,
@@ -31,8 +31,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CACHE_PATH = "workshop3/data/processed_cache.npz"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CACHE_PATH = "data/processed_cache.npz"
 
 LIKE_THRESHOLD = 4.0
 REPEAT_PENALTY = -1.5
@@ -74,7 +74,7 @@ class MovieLensRecEnv(gym.Env):
         if not resolved_cache.exists():
             raise FileNotFoundError(
                 f"Processed cache not found at '{self.cache_path}'. "
-                f"Run `python workshop3/src/data_prep.py` first."
+                f"Run `python -m src.data_loader --w3` first."
             )
 
         data = np.load(self.cache_path)
@@ -351,8 +351,8 @@ class MovieLensRecEnv(gym.Env):
 
 def run_random_policy_diagnostics(
     num_episodes: int = 100,
-    save_fig_path: str = "workshop3/report/figures/fig2_random_policy_diagnostics.png",
-    save_json_path: str = "workshop3/report/random_diagnostics.json",
+    save_fig_path: str = "runs/workshop3/fig2_random_policy_diagnostics.png",
+    save_json_path: str = "runs/workshop3/random_diagnostics.json",
     cache_path: str = DEFAULT_CACHE_PATH,
     seed: int = 42,
 ) -> Dict[str, Any]:

@@ -3,8 +3,8 @@
   "total_wall_time_sec": 1898.74,
   "selection_rule": "highest smoothed validation return (mean of the last 5 greedy validation evaluations) among the 16 grid runs (8 hyperparameter configurations x 2 architectures)",
   "best_grid_config_id": "slot_cfg3_low_lr",
-  "champion_checkpoint": "workshop3/checkpoints/agent_best.pt",
-  "bandit_checkpoint": "workshop3/checkpoints/bandit_gamma0.pt",
+  "champion_checkpoint": "checkpoints/agent_best.pt",
+  "bandit_checkpoint": "checkpoints/bandit_gamma0.pt",
   "hyperparameter_table": [
     {
       "config_id": "flat_cfg1_baseline",
