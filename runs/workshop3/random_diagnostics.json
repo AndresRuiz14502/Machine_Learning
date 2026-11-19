@@ -1,0 +1,17 @@
+{
+  "num_episodes": 100,
+  "mean_return": -0.4818,
+  "std_return": 4.54,
+  "min_return": -9.6829,
+  "max_return": 12.5959,
+  "mean_episode_length": 8.57,
+  "std_episode_length": 1.98,
+  "early_termination_rate": 0.4,
+  "full_horizon_rate": 0.6,
+  "mean_hit_rate": 0.318,
+  "mean_novelty_bits": 11.498,
+  "repeat_action_rate": 0.0735,
+  "invalid_slot_action_rate": 0.1354,
+  "total_steps_executed": 857,
+  "unique_actions_sampled": 50
+}

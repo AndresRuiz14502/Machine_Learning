@@ -1,0 +1,266 @@
+{
+  "reconstruction_metrics": {
+    "Standard AE (z=16) [Normal Test]": {
+      "MSE": 0.22854,
+      "RMSE": 0.47806,
+      "MAE": 0.2885,
+      "R2": 0.7966,
+      "Pearson_r": 0.8864,
+      "Cosine_Sim": 0.8873
+    },
+    "Denoising AE (z=16) [Normal Test]": {
+      "MSE": 0.2389,
+      "RMSE": 0.48877,
+      "MAE": 0.29432,
+      "R2": 0.7874,
+      "Pearson_r": 0.8808,
+      "Cosine_Sim": 0.8819
+    },
+    "Best VAE (beta=4.0, z=16) [Normal Test]": {
+      "MSE": 0.84396,
+      "RMSE": 0.91868,
+      "MAE": 0.60431,
+      "R2": 0.249,
+      "Pearson_r": 0.3475,
+      "Cosine_Sim": 0.3696
+    },
+    "Standard AE on Noisy Input (std=0.25)": {
+      "MSE": 0.24961,
+      "RMSE": 0.49961,
+      "MAE": 0.3074,
+      "R2": 0.7779,
+      "Pearson_r": 0.8688,
+      "Cosine_Sim": 0.8701
+    },
+    "Denoising AE on Noisy Input (std=0.25)": {
+      "MSE": 0.25114,
+      "RMSE": 0.50114,
+      "MAE": 0.30539,
+      "R2": 0.7765,
+      "Pearson_r": 0.8705,
+      "Cosine_Sim": 0.8718
+    },
+    "VAE (beta=0.5) [Normal Test]": {
+      "MSE": 0.49319,
+      "RMSE": 0.70228,
+      "MAE": 0.39707,
+      "R2": 0.5611,
+      "Pearson_r": 0.6898,
+      "Cosine_Sim": 0.6935
+    },
+    "VAE (beta=1.0) [Normal Test]": {
+      "MSE": 0.62653,
+      "RMSE": 0.79154,
+      "MAE": 0.46314,
+      "R2": 0.4425,
+      "Pearson_r": 0.5782,
+      "Cosine_Sim": 0.5866
+    },
+    "VAE (beta=4.0) [Normal Test]": {
+      "MSE": 0.84396,
+      "RMSE": 0.91868,
+      "MAE": 0.60431,
+      "R2": 0.249,
+      "Pearson_r": 0.3475,
+      "Cosine_Sim": 0.3696
+    }
+  },
+  "feature_group_errors": [
+    {
+      "Feature Group": "User & Item Historical Stats (cols 0..7)",
+      "Normal_MSE": 0.2787,
+      "Anomaly_MSE": 0.3739,
+      "Anomaly_to_Normal_Ratio": 1.34
+    },
+    {
+      "Feature Group": "Multi-Hot Genres & Movie Age (cols 8..28)",
+      "Normal_MSE": 0.1603,
+      "Anomaly_MSE": 0.1946,
+      "Anomaly_to_Normal_Ratio": 1.21
+    },
+    {
+      "Feature Group": "Collaborative GMF Interactions (cols 29..47)",
+      "Normal_MSE": 0.4505,
+      "Anomaly_MSE": 0.5167,
+      "Anomaly_to_Normal_Ratio": 1.15
+    },
+    {
+      "Feature Group": "Normal-Manifold Compatibility Deviations (cols 48..63)",
+      "Normal_MSE": 0.0295,
+      "Anomaly_MSE": 0.0605,
+      "Anomaly_to_Normal_Ratio": 2.05
+    }
+  ],
+  "anomaly_detection_results": {
+    "W4 Standard AE (Recon MSE)": {
+      "Threshold_Val": 0.0895,
+      "Accuracy": 0.6427,
+      "Precision": 0.6553,
+      "Recall": 0.9239,
+      "F1": 0.7668,
+      "ROC_AUC": 0.5892
+    },
+    "W4 Denoising AE (Recon MSE)": {
+      "Threshold_Val": 0.0965,
+      "Accuracy": 0.6424,
+      "Precision": 0.6553,
+      "Recall": 0.9228,
+      "F1": 0.7664,
+      "ROC_AUC": 0.5875
+    },
+    "W4 VAE (beta=4.0, Recon MSE)": {
+      "Threshold_Val": 0.4802,
+      "Accuracy": 0.6553,
+      "Precision": 0.6647,
+      "Recall": 0.9234,
+      "F1": 0.773,
+      "ROC_AUC": 0.6424
+    },
+    "W4 VAE (beta=4.0, ELBO = Recon + beta*KL)": {
+      "Threshold_Val": 0.483,
+      "Accuracy": 0.6528,
+      "Precision": 0.662,
+      "Recall": 0.927,
+      "F1": 0.7724,
+      "ROC_AUC": 0.6964
+    },
+    "W4 VAE (beta=0.5, ELBO)": {
+      "Threshold_Val": 0.3674,
+      "Accuracy": 0.6493,
+      "Precision": 0.6569,
+      "Recall": 0.9382,
+      "F1": 0.7728,
+      "ROC_AUC": 0.6134
+    },
+    "W4 VAE (beta=1.0, ELBO)": {
+      "Threshold_Val": 0.4183,
+      "Accuracy": 0.6503,
+      "Precision": 0.659,
+      "Recall": 0.9321,
+      "F1": 0.7721,
+      "ROC_AUC": 0.6396
+    },
+    "W4 VAE (beta=4.0, ELBO)": {
+      "Threshold_Val": 0.483,
+      "Accuracy": 0.6528,
+      "Precision": 0.662,
+      "Recall": 0.927,
+      "F1": 0.7724,
+      "ROC_AUC": 0.6964
+    }
+  },
+  "cumulative_comparison": {
+    "W2 HybridNeuMF (Deep CF)": {
+      "Paradigm": "W2 Supervised Deep Learning",
+      "Accuracy": 0.7156,
+      "Precision": 0.5838,
+      "Recall": 0.7651,
+      "F1": 0.6623,
+      "ROC_AUC": 0.7942
+    },
+    "W1 RandomForestClf": {
+      "Paradigm": "W1 Supervised Tree",
+      "Accuracy": 0.7031,
+      "Precision": 0.5773,
+      "Recall": 0.6914,
+      "F1": 0.6293,
+      "ROC_AUC": 0.7645
+    },
+    "W1 Bias (mu+bu+bi)": {
+      "Paradigm": "W1 Collaborative Bias",
+      "Accuracy": 0.7128,
+      "Precision": 0.6721,
+      "Recall": 0.4139,
+      "F1": 0.5123,
+      "ROC_AUC": 0.7607
+    },
+    "W1 LogisticRegression": {
+      "Paradigm": "W1 Supervised Linear",
+      "Accuracy": 0.7134,
+      "Precision": 0.6026,
+      "Recall": 0.627,
+      "F1": 0.6146,
+      "ROC_AUC": 0.7604
+    },
+    "W1 Ridge Threshold": {
+      "Paradigm": "W1 Supervised Linear",
+      "Accuracy": 0.6987,
+      "Precision": 0.7089,
+      "Recall": 0.2938,
+      "F1": 0.4154,
+      "ROC_AUC": 0.759
+    },
+    "W1 GradientBoostingClf": {
+      "Paradigm": "W1 Supervised Tree",
+      "Accuracy": 0.6979,
+      "Precision": 0.5697,
+      "Recall": 0.6986,
+      "F1": 0.6276,
+      "ROC_AUC": 0.7518
+    },
+    "W4 VAE (beta=4.0, ELBO = Recon + beta*KL)": {
+      "Paradigm": "W4 Unsupervised Autoencoder",
+      "Accuracy": 0.6528,
+      "Precision": 0.662,
+      "Recall": 0.927,
+      "F1": 0.7724,
+      "ROC_AUC": 0.6964
+    },
+    "W4 VAE (beta=4.0, ELBO)": {
+      "Paradigm": "W4 Unsupervised Autoencoder",
+      "Accuracy": 0.6528,
+      "Precision": 0.662,
+      "Recall": 0.927,
+      "F1": 0.7724,
+      "ROC_AUC": 0.6964
+    },
+    "W4 VAE (beta=4.0, Recon MSE)": {
+      "Paradigm": "W4 Unsupervised Autoencoder",
+      "Accuracy": 0.6553,
+      "Precision": 0.6647,
+      "Recall": 0.9234,
+      "F1": 0.773,
+      "ROC_AUC": 0.6424
+    },
+    "W4 VAE (beta=1.0, ELBO)": {
+      "Paradigm": "W4 Unsupervised Autoencoder",
+      "Accuracy": 0.6503,
+      "Precision": 0.659,
+      "Recall": 0.9321,
+      "F1": 0.7721,
+      "ROC_AUC": 0.6396
+    },
+    "W4 VAE (beta=0.5, ELBO)": {
+      "Paradigm": "W4 Unsupervised Autoencoder",
+      "Accuracy": 0.6493,
+      "Precision": 0.6569,
+      "Recall": 0.9382,
+      "F1": 0.7728,
+      "ROC_AUC": 0.6134
+    },
+    "W4 Standard AE (Recon MSE)": {
+      "Paradigm": "W4 Unsupervised Autoencoder",
+      "Accuracy": 0.6427,
+      "Precision": 0.6553,
+      "Recall": 0.9239,
+      "F1": 0.7668,
+      "ROC_AUC": 0.5892
+    },
+    "W4 Denoising AE (Recon MSE)": {
+      "Paradigm": "W4 Unsupervised Autoencoder",
+      "Accuracy": 0.6424,
+      "Precision": 0.6553,
+      "Recall": 0.9228,
+      "F1": 0.7664,
+      "ROC_AUC": 0.5875
+    },
+    "W1 GlobalMean Baseline": {
+      "Paradigm": "W1 Supervised Baseline",
+      "Accuracy": 0.6356,
+      "Precision": 0.6356,
+      "Recall": 1.0,
+      "F1": 0.7772,
+      "ROC_AUC": 0.5
+    }
+  }
+}

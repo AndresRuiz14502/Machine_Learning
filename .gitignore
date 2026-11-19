@@ -18,3 +18,18 @@ Machine_Learning/
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Python tooling: bytecode, test cache and virtual environments
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+
+# Local-only report generation, compiled PDFs, auxiliary tests, and raw fallback CSVs
+# (kept locally on disk, excluded from the git branch)
+report/
+tools/
+tests/
+*.pdf
+data/ml-32m/
