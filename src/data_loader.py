@@ -41,17 +41,23 @@ def set_seed(seed: int = SEED) -> None:
 
 
 def resolve_data_dir(candidate_paths=None) -> Path:
-    """Automatically resolve the dataset directory path."""
+    """Automatically resolve the dataset directory path (Local, Google Drive / Colab)."""
     if candidate_paths is None:
         candidate_paths = [
+            Path("/content/drive/MyDrive/ml-32m"),
+            Path("/content/drive/MyDrive/Dataset/ml-32m"),
+            Path("/content/drive/MyDrive/dataSet"),
+            Path("/content/ml-32m"),
             Path(r"C:\Users\andre\OneDrive\Documentos\TranajosML\Workshop1\dataSet"),
+            PROJECT_ROOT / "ml-32m",
             PROJECT_ROOT / "dataSet",
+            Path("ml-32m"),
             Path("dataSet"),
         ]
     data_dir = next((p for p in candidate_paths if (p / "ratings.csv").exists()), None)
     if data_dir is None:
         raise FileNotFoundError(
-            "'ratings.csv' not found. Update CANDIDATE_PATHS with the correct path to your dataSet."
+            "'ratings.csv' not found. Update CANDIDATE_PATHS with the correct path to your dataSet or ml-32m folder."
         )
     return data_dir
 
