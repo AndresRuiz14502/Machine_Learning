@@ -66,6 +66,63 @@ drive.mount("/content/drive")
 
 ---
 
+## Workshop 5 — Reproduction Commands (Generative Adversarial Networks)
+
+Workshop 5 trains a **tabular GAN** on the 64-dimensional leak-free interaction profiles reused from Workshop 4 (same chronological split and `SEED = 42`), compares a **Vanilla GAN** against a **WGAN-GP**, adds an optional **conditional GAN (cGAN)** on the `like` label, evaluates generation quality with domain-specific metrics, and runs a **data augmentation experiment** on a downstream `like` classifier. All Workshop 5 code lives in `src/` with a `*gan*` naming convention and a `"""Workshop 5 ..."""` docstring; all artifacts follow the same convention as Workshops 2–4 (`checkpoints/gan_*.pt`, `runs/workshop5/`).
+
+1. **Verify GAN, Critic, and cGAN architectures (`src/gan.py`):**
+
+```bash
+.venv/bin/python -m src.gan
+```
+
+2. **Train the Vanilla GAN (BCE, label smoothing `0.9`, Adam `lr = 2e-4`) and the WGAN-GP (critic 5:1, gradient penalty `λ = 10`) (`src/train_gan.py`):**
+
+```bash
+.venv/bin/python -m src.train_gan
+```
+
+Saves `checkpoints/gan_vanilla_best.pt`, `checkpoints/gan_wgan_best.pt`, TensorBoard logs and per-epoch samples in `runs/workshop5/`.
+
+3. **Train the optional conditional GAN (cGAN) on the `like` label (`src/cgan.py`):**
+
+```bash
+.venv/bin/python -m src.cgan
+```
+
+Saves `checkpoints/cgan_best.pt`.
+
+4. **Evaluate generation quality (tabular Fréchet distance, correlation preservation, diversity / mode-collapse diagnostics) (`src/evaluate_gan.py`):**
+
+```bash
+.venv/bin/python -m src.evaluate_gan
+```
+
+Generates `runs/workshop5/gan_quality_metrics.json`.
+
+5. **Generate synthetic samples and real-vs-generated figures (`src/generate_samples.py`):**
+
+```bash
+.venv/bin/python -m src.generate_samples
+```
+
+Generates `runs/workshop5/grid_real_vs_*.png`, `runs/workshop5/feature_dist_*.png`, and `runs/workshop5/pca_real_vs_generated.png`.
+
+6. **Run the data augmentation experiment (real / real+vanilla / real+WGAN-GP / real+cGAN) and build the cumulative W1–W5 table (`src/augment_and_retrain.py`, `src/cumulative_table.py`):**
+
+```bash
+.venv/bin/python -m src.augment_and_retrain
+.venv/bin/python -m src.cumulative_table
+```
+
+Generates `runs/workshop5/augmentation_results.json` and `runs/workshop5/cumulative_comparison.csv`.
+
+> **Downstream model note:** the augmentation experiment uses a tabular `like` classifier over the 64-D vectors (not Workshop 2's `HybridNeuMF`, which consumes user/item *indices* and cannot ingest synthetic feature vectors). This follows the Frid-Adar et al. (2018) augmentation pipeline (train GAN → generate synthetic → augment downstream classifier → measure gain).
+
+> **GPU note:** training 100+ epochs for three GANs is slow on CPU. The code auto-selects CUDA when available; for fast full runs use a GPU (e.g. Kaggle). See `notebooks/w5_gan.ipynb` for a detailed step-by-step Kaggle guide.
+
+---
+
 ## Workshop 4 — Reproduction Commands (Autoencoders & VAEs)
 
 1. **Verify AE and VAE architectures (`src/autoencoder.py`):**
